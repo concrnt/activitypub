@@ -1,0 +1,18 @@
+{
+  "type": "module",
+  "dependencies": {
+    "@dotenvx/dotenvx": "^1.14.1",
+    "@fedify/fedify": "1.10.0",
+    "@hono/node-server": "^1.12.0",
+    "@logtape/logtape": "^0.8.2",
+    "tsx": "^4.17.0",
+    "x-forwarded-fetch": "^0.2.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.8.3"
+  },
+  "scripts": {
+    "dev": "dotenvx run -- tsx watch ./main.ts",
+    "prod": "dotenvx run -- node --import tsx ./main.ts"
+  }
+}
