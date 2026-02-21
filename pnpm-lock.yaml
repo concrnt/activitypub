@@ -14,12 +14,18 @@ importers:
       '@fedify/fedify':
         specifier: 1.10.0
         version: 1.10.0
+      '@fedify/hono':
+        specifier: ^1.10.3
+        version: 1.10.3(@fedify/fedify@1.10.0)(hono@4.12.1)
       '@hono/node-server':
         specifier: ^1.12.0
-        version: 1.19.9(hono@4.11.10)
+        version: 1.19.9(hono@4.12.1)
       '@logtape/logtape':
         specifier: ^0.8.2
         version: 0.8.2
+      hono:
+        specifier: ^4.12.1
+        version: 4.12.1
       tsx:
         specifier: ^4.17.0
         version: 4.21.0
@@ -263,6 +269,12 @@ packages:
     resolution: {integrity: sha512-fzkZrVLMJHBpF6/jqaQMe3ZrL++FR2SLHSUosAYtwjY7gzgsvQ/+GGC4qk9FU2qQEVhi2vEYmeQbhg1nVuO36g==}
     engines: {bun: '>=1.1.0', deno: '>=2.0.0', node: '>=22.0.0'}
 
+  '@fedify/hono@1.10.3':
+    resolution: {integrity: sha512-10gwmyLYisWvTBHvtmxRkY0zkJhYLS2j7JDMmP6vx/ikTBz+fX1zoI3p9Ozpre/M1lpACHpZmyYrcYm3hLT1EQ==}
+    peerDependencies:
+      '@fedify/fedify': ^1.10.3
+      hono: ^4.0.0
+
   '@hono/node-server@1.19.9':
     resolution: {integrity: sha512-vHL6w3ecZsky+8P5MD+eFfaGTyCeOHUIFYMGpQGbrBTSmNNoxv0if69rEZ5giu36weC5saFuznL411gRX7bJDw==}
     engines: {node: '>=18.14.1'}
@@ -395,8 +407,8 @@ packages:
   get-tsconfig@4.13.6:
     resolution: {integrity: sha512-shZT/QMiSHc/YBLxxOkMtgSid5HFoauqCE3/exfsEcwg1WkeqjG+V40yBbBrsD+jW2HDXcs28xOfcbm2jI8Ddw==}
 
-  hono@4.11.10:
-    resolution: {integrity: sha512-kyWP5PAiMooEvGrA9jcD3IXF7ATu8+o7B3KCbPXid5se52NPqnOpM/r9qeW2heMnOekF4kqR1fXJqCYeCLKrZg==}
+  hono@4.12.1:
+    resolution: {integrity: sha512-hi9afu8g0lfJVLolxElAZGANCTTl6bewIdsRNhaywfP9K8BPf++F2z6OLrYGIinUwpRKzbZHMhPwvc0ZEpAwGw==}
     engines: {node: '>=16.9.0'}
 
   human-signals@2.1.0:
@@ -714,9 +726,14 @@ snapshots:
       url-template: 3.1.1
       urlpattern-polyfill: 10.1.0
 
-  '@hono/node-server@1.19.9(hono@4.11.10)':
+  '@fedify/hono@1.10.3(@fedify/fedify@1.10.0)(hono@4.12.1)':
     dependencies:
-      hono: 4.11.10
+      '@fedify/fedify': 1.10.0
+      hono: 4.12.1
+
+  '@hono/node-server@1.19.9(hono@4.12.1)':
+    dependencies:
+      hono: 4.12.1
 
   '@js-temporal/polyfill@0.5.1':
     dependencies:
@@ -851,7 +868,7 @@ snapshots:
     dependencies:
       resolve-pkg-maps: 1.0.0
 
-  hono@4.11.10: {}
+  hono@4.12.1: {}
 
   human-signals@2.1.0: {}
 
