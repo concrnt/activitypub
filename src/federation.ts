@@ -1,9 +1,9 @@
 import { createFederation } from "@fedify/fedify";
-import { Person, Follow, Endpoints } from "@fedify/vocab";
+import { Person, Follow, Endpoints, Accept } from "@fedify/vocab";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
 import { Redis } from "ioredis";
-import { db, apEntity } from './db/index.ts';
+import { db, apEntity, apFollow } from './db/index.ts';
 import { importJwk } from "@fedify/fedify";
 import { eq } from "drizzle-orm";
 
@@ -17,13 +17,39 @@ const federation = createFederation({
 federation
     .setInboxListeners("/users/{identifier}/inbox", "/inbox")
     .on(Follow, async (ctx, follow) => {
-        if (follow.id == null || follow.actorId == null || follow.objectId == null) {
+
+        const followId = follow.id;
+        if (followId == null) {
+            logger.warn("Received Follow activity without id");
             return;
         }
-        const parsed = ctx.parseUri(follow.objectId);
-        if (parsed?.type !== "actor") return;
-        const follower = await follow.getActor(ctx);
-        console.debug(follower);
+
+        const object = ctx.parseUri(follow.objectId);
+        if (object == null || object.type !== "actor") {
+            logger.warn(`Received Follow activity with invalid object: ${follow.objectId}`);
+            return;
+        }
+
+        const follower = await follow.getActor();
+        if (follower?.id == null || follower.inboxId == null) {
+            logger.warn(`Received Follow activity with invalid actor: ${follow.actorId}`);
+            return;
+        }
+
+        await db.insert(apFollow).values({
+            id: followId.toString(),
+            accepted: true,
+            publisherId: object.identifier,
+            subscriberId: follow.actorId?.toString(),
+        })
+
+        const accept = new Accept({
+            actor: follow.objectId,
+            to: follow.actorId,
+            object: follow,
+        });
+
+        await ctx.sendActivity(object, follower, accept);
     });
 
 federation.setActorDispatcher("/users/{identifier}", async (ctx, identifier) => {
