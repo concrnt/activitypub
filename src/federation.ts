@@ -1,12 +1,14 @@
-import { createFederation, Follow, Person } from "@fedify/fedify";
+import { createFederation } from "@fedify/fedify";
+import { Person, Follow } from "@fedify/vocab";
 import { getLogger } from "@logtape/logtape";
-import { MemoryKvStore, InProcessMessageQueue } from "@fedify/fedify";
+import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
+import { Redis } from "ioredis";
 
-const logger = getLogger("cc-ap-bridge");
+const logger = getLogger("activitypub");
 
 const federation = createFederation({
-  kv: new MemoryKvStore(),
-  queue: new InProcessMessageQueue(),
+  kv: new RedisKvStore(new Redis(process.env.REDIS_URL)),
+  queue: new RedisMessageQueue(() => new Redis(process.env.REDIS_URL)),
 });
 
 federation
@@ -21,14 +23,15 @@ federation
         console.debug(follower);
     });
 
-federation.setActorDispatcher("/users/{identifier}", async (ctx, identifier) => {
+federation.setActorDispatcher(
+  "/users/{identifier}",
+  async (ctx, identifier) => {
     return new Person({
-        id: ctx.getActorUri(identifier),
-        preferredUsername: identifier,
-        name: identifier,
-        url: new URL("/", ctx.url),
-        inbox: ctx.getInboxUri(identifier),
+      id: ctx.getActorUri(identifier),
+      preferredUsername: identifier,
+      name: identifier,
     });
-});
+  },
+);
 
 export default federation;

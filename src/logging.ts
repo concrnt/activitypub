@@ -8,8 +8,16 @@ await configure({
   },
   filters: {},
   loggers: [
-    { category: "cc-ap-bridge", lowestLevel: "debug", sinks: ["console"] },
+    {
+      category: "activitypub",
+      lowestLevel: "debug",
+      sinks: ["console"],
+    },
     { category: "fedify", lowestLevel: "info", sinks: ["console"] },
-    { category: ["logtape", "meta"], lowestLevel: "warning", sinks: ["console"] },
+    {
+      category: ["logtape", "meta"],
+      lowestLevel: "warning",
+      sinks: ["console"],
+    },
   ],
 });

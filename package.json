@@ -1,20 +1,26 @@
 {
   "type": "module",
+  "scripts": {
+    "dev": "dotenvx run -- tsx watch ./src/index.ts",
+    "prod": "dotenvx run -- node --import tsx ./src/index.ts",
+    "lint": "eslint ."
+  },
   "dependencies": {
     "@dotenvx/dotenvx": "^1.14.1",
-    "@fedify/fedify": "1.10.0",
-    "@fedify/hono": "^1.10.3",
+    "@fedify/fedify": "2.0.0",
+    "@fedify/hono": "2.0.0",
+    "@fedify/redis": "2.0.0",
+    "@fedify/vocab": "2.0.0",
     "@hono/node-server": "^1.12.0",
-    "@logtape/logtape": "^0.8.2",
-    "hono": "^4.12.1",
+    "@logtape/logtape": "^2.0.0",
+    "hono": "^4.5.0",
+    "ioredis": "^5.4.1",
     "tsx": "^4.17.0",
     "x-forwarded-fetch": "^0.2.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.8.3"
-  },
-  "scripts": {
-    "dev": "dotenvx run -- tsx watch ./main.ts",
-    "prod": "dotenvx run -- node --import tsx ./main.ts"
+    "@biomejs/biome": "^2.2.4",
+    "@fedify/lint": "2.0.0",
+    "eslint": "^9.0.0"
   }
 }
