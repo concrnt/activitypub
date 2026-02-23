@@ -4,6 +4,7 @@ import { federation } from "@fedify/hono";
 import { getLogger } from "@logtape/logtape";
 import fedi from "./federation.ts";
 import { Person, Note } from "@fedify/vocab";
+import { db, apEntity } from "./db"
 
 const logger = getLogger("activitypub");
 
@@ -14,6 +15,20 @@ app.get("/", (c) => c.text("Hello, Fedify!"));
 
 app.get("/api/test", (c) => {
     return c.json({ message: "Hello from the API!" });
+});
+
+app.post("/api/setup", async (c) => {
+    const { username } = await c.req.json();
+
+    if (typeof username !== "string" || !username.trim()) {
+        return c.json({ error: "Invalid 'username' in request body" }, 400);
+    }
+
+    console.log("Setting up ActivityPub entity for username:", username);
+
+    await db.insert(apEntity).values({
+        id: username,
+    })
 });
 
 app.get("/api/resolve", async (c) => {
