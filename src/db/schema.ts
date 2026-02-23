@@ -9,3 +9,10 @@ export const apEntity = pgTable("ap_entities", {
     cDate: date("c_date").defaultNow(),
 });
 
+export const apFollow = pgTable("ap_follows", {
+    id: text("id").primaryKey(),
+    accepted: boolean("accepted").default(false),
+    publisherId: text("publisher_id"),
+    subscriberId: text("subscriber_id"),
+});
+
