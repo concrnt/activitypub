@@ -92,10 +92,10 @@ federation.setActorDispatcher("/users/{identifier}", async (ctx, identifier) => 
 }).setKeyPairsDispatcher(async (ctx, identifier) => {
 
     const users = await db.select().from(apEntity).where(eq(apEntity.id, identifier)).limit(1);
-    if (users.length === 0) return null;
+    if (users.length === 0) return [];
     
     const user = users[0];
-    if (!user.publicKey || !user.privateKey) return null;
+    if (!user.publicKey || !user.privateKey) return [];
 
     return [{
         privateKey: await importJwk(JSON.parse(user.privateKey), "private"),
