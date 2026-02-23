@@ -5,6 +5,7 @@ import { getLogger } from "@logtape/logtape";
 import fedi from "./federation.ts";
 import { Person, Note } from "@fedify/vocab";
 import { db, apEntity } from "./db"
+import { generateCryptoKeyPair, exportJwk } from "@fedify/fedify";
 
 const logger = getLogger("activitypub");
 
@@ -13,7 +14,7 @@ app.use(federation(fedi, () => undefined));
 
 app.get("/", (c) => c.text("Hello, Fedify!"));
 
-app.get("/api/test", (c) => {
+app.get("/api/test", async (c) => {
     return c.json({ message: "Hello from the API!" });
 });
 
@@ -26,8 +27,12 @@ app.post("/api/setup", async (c) => {
 
     console.log("Setting up ActivityPub entity for username:", username);
 
+    const { privateKey, publicKey } = await generateCryptoKeyPair("RSASSA-PKCS1-v1_5");
+
     await db.insert(apEntity).values({
         id: username,
+        publicKey: JSON.stringify(await exportJwk(publicKey)),
+        privateKey: JSON.stringify(await exportJwk(privateKey)),
     })
 });
 
