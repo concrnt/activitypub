@@ -1,11 +1,11 @@
 import { createFederation } from "@fedify/fedify";
-import { Person, Follow, Endpoints, Accept } from "@fedify/vocab";
+import { Person, Follow, Endpoints, Accept, Undo } from "@fedify/vocab";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
 import { Redis } from "ioredis";
 import { db, apEntity, apFollow } from './db/index.ts';
 import { importJwk } from "@fedify/fedify";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 const logger = getLogger("activitypub");
 
@@ -17,12 +17,6 @@ const federation = createFederation({
 federation
     .setInboxListeners("/users/{identifier}/inbox", "/inbox")
     .on(Follow, async (ctx, follow) => {
-
-        const followId = follow.id;
-        if (followId == null) {
-            logger.warn("Received Follow activity without id");
-            return;
-        }
 
         const object = ctx.parseUri(follow.objectId);
         if (object == null || object.type !== "actor") {
@@ -36,8 +30,9 @@ federation
             return;
         }
 
+        // TODO: object.identifierを内部IDに変換 + 存在確認
+
         await db.insert(apFollow).values({
-            id: followId.toString(),
             accepted: true,
             publisherId: object.identifier,
             subscriberId: follow.actorId?.toString(),
@@ -50,6 +45,28 @@ federation
         });
 
         await ctx.sendActivity(object, follower, accept);
+    })
+    .on(Undo, async (ctx, undo) => {
+        const object = await undo.getObject();
+        if (object instanceof Follow) {
+            if (undo.actorId == null || undo.objectId == null) return
+            const parsed = ctx.parseUri(object.objectId);
+            if (parsed == null || parsed.type !== "actor") return;
+
+            // TODO: object.identifierを内部IDに変換 + 存在確認
+
+            await db
+                .delete(apFollow)
+                .where(
+                    and(
+                        eq(apFollow.publisherId, parsed.identifier),
+                        eq(apFollow.subscriberId, undo.actorId.toString())
+                    )
+                );
+
+        } else {
+            logger.warn(`Received Undo activity with unsupported object: ${object}`);
+        }
     });
 
 federation.setActorDispatcher("/users/{identifier}", async (ctx, identifier) => {
