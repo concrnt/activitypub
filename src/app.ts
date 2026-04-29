@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { federation } from "@fedify/hono";
 import { getLogger } from "@logtape/logtape";
 import fedi from "./federation.ts";
-import { Person, Note, isActor, Follow } from "@fedify/vocab";
+import { Person, Note, isActor, Follow, Undo } from "@fedify/vocab";
 import { db, apEntity } from "./db"
 import { resolveConcrntDocument } from "./concrnt.ts";
 import { eq, and } from "drizzle-orm";
@@ -121,6 +121,55 @@ app.post("/ap/api/follow", async (c) => {
 
     return c.text("Follow request sent to " + target);
 });
+
+app.post("/ap/api/unfollow", async (c) => {
+
+    const authInfo = receiveAuthInfo(c)
+    if (!authInfo) {
+        return c.json({ error: "Missing authentication information" }, 400);
+    }
+
+    const id = authInfo.ccid
+
+    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, id)).limit(1).then(res => res[0]);
+    if (!entity) {
+        return c.json({ error: "No ActivityPub entity found for this user" }, 404);
+    }
+
+    const { target } = await c.req.json();
+
+    const ctx = fedi.createContext(c.req.raw, undefined);
+    const actor = await ctx.lookupObject(target);
+    if (!isActor(actor)) {
+        return c.json({ error: "Target URI does not resolve to an actor" }, 400);
+    }
+
+    await ctx.sendActivity(
+        { identifier: entity.id },
+        actor,
+        new Undo({
+            actor: ctx.getActorUri(entity.id),
+            object: new Follow({
+                actor: ctx.getActorUri(entity.id),
+                object: actor.id,
+                to: actor.id,
+            }),
+        }),
+        { excludeBaseUris: [new URL(ctx.origin)] }
+    )
+
+    await db
+        .delete(apFollow)
+        .where(
+            and(
+                eq(apFollow.publisherId, actor.id.toString()),
+                eq(apFollow.subscriberId, entity.id)
+            )
+        );
+
+    return c.text("Unfollow request sent to " + target);
+});
+
 
 app.get("/ap/api/resolve", async (c) => {
     const ctx = fedi.createContext(c.req.raw, undefined);
