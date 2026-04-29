@@ -1,5 +1,5 @@
 import { createFederation } from "@fedify/fedify";
-import { Person, Follow, Endpoints, Accept, Undo, Note, PUBLIC_COLLECTION, type Recipient } from "@fedify/vocab";
+import { Person, Follow, Endpoints, Accept, Undo, Note, PUBLIC_COLLECTION, type Recipient, isActor } from "@fedify/vocab";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
 import { Redis } from "ioredis";
@@ -15,6 +15,24 @@ const federation = createFederation({
   kv: new RedisKvStore(new Redis(process.env.REDIS_URL)),
   queue: new RedisMessageQueue(() => new Redis(process.env.REDIS_URL)),
 });
+
+federation.setNodeInfoDispatcher("/nodeinfo/2.1", async (ctx) => {
+    return {
+        software: {
+            name: "concrnt-ap-bridge",
+            version: { major: 0, minor: 1, patch: 0 },
+            homepage: new URL("https://github.com/concrnt/activitypub"),
+        },
+        protocols: ["activitypub"],
+        usage: {
+            users: {
+                total: 0,
+            },
+            localPosts: 0,
+            localComments: 0,
+        }
+    }
+})
 
 federation
     .setInboxListeners("/ap/users/{identifier}/inbox", "/inbox")
@@ -89,6 +107,27 @@ federation
             logger.warn(`Received Undo activity with unsupported object: ${object}`);
         }
     })
+    .on(Accept, async (ctx, accept) => {
+        console.log("Received Accept activity:", accept);
+
+        const follow = await accept.getObject()
+        if (!(follow instanceof Follow)) return
+
+        const following = await accept.getActor()
+        if (!isActor(following)) return
+
+        const followerId = follow.actorId
+        if (followerId == null) return
+
+        /*
+        await db.insert(apFollow).values({
+            accepted: true,
+            publisherId: follow.objectId.toString(),
+            subscriberId: followerId.toString(),
+        })
+        */
+
+    })
 ;
 
 
@@ -116,10 +155,16 @@ federation.setActorDispatcher("/ap/users/{identifier}", async (ctx, identifier) 
 }).setKeyPairsDispatcher(async (ctx, identifier) => {
 
     const users = await db.select().from(apEntity).where(eq(apEntity.id, identifier)).limit(1);
-    if (users.length === 0) return [];
+    if (users.length === 0) {
+        console.warn(`No user found for identifier: ${identifier}`);
+        return [];
+    }
     
     const user = users[0];
-    if (!user.publicKey || !user.privateKey) return [];
+    if (!user.publicKey || !user.privateKey) {
+        console.warn(`User ${identifier} does not have valid keys`);
+        return [];
+    }
 
     return [{
         privateKey: await importJwk(JSON.parse(user.privateKey), "private"),

@@ -3,10 +3,11 @@ import { Hono } from "hono";
 import { federation } from "@fedify/hono";
 import { getLogger } from "@logtape/logtape";
 import fedi from "./federation.ts";
-import { Person, Note } from "@fedify/vocab";
+import { Person, Note, isActor, Follow } from "@fedify/vocab";
 import { db, apEntity } from "./db"
 import { generateCryptoKeyPair, exportJwk } from "@fedify/fedify";
 import { resolveConcrntDocument } from "./concrnt.ts";
+import { eq, and } from "drizzle-orm";
 
 const logger = getLogger("activitypub");
 
@@ -89,10 +90,33 @@ app.post("/ap/api/follow", async (c) => {
 
     const id = authInfo.ccid
 
-    const { targetURI } = await c.req.json();
+    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, id)).limit(1).then(res => res[0]);
+    if (!entity) {
+        return c.json({ error: "No ActivityPub entity found for this user" }, 404);
+    }
 
-    // TODO
+    const { target } = await c.req.json();
 
+    const ctx = fedi.createContext(c.req.raw, undefined);
+    const actor = await ctx.lookupObject(target);
+    if (!isActor(actor)) {
+        return c.json({ error: "Target URI does not resolve to an actor" }, 400);
+    }
+
+    console.log('from:', ctx.getActorUri(entity.id));
+    console.log('to:', actor.id);
+
+    await ctx.sendActivity(
+        { identifier: entity.id },
+        actor,
+        new Follow({
+            actor: ctx.getActorUri(entity.id),
+            object: actor.id,
+            to: actor.id,
+        })
+    )
+
+    return c.text("Follow request sent to " + target);
 });
 
 app.get("/ap/api/resolve", async (c) => {
