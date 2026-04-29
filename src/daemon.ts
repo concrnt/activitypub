@@ -23,11 +23,9 @@ export const startEntityBroker = async () => {
             console.error("Failed to subscribe to Redis channels:", err);
             return;
         }
-        console.log(`Subscribed to ${count} Redis channels.`);
     });
 
     redis.on("pmessage", async (pattern, channel, message) => {
-        console.log(`Received message on channel ${channel}: ${message}`);
 
         entities.forEach(async entity => {
             const prefix = `cckv://${entity.ccid}/concrnt.world/profiles/main/home-timeline/`;
@@ -41,7 +39,7 @@ export const startEntityBroker = async () => {
                     return;
                 }
 
-                console.log(`Entity ${entity.id} has followers:`, followers);
+                console.log(`Entity ${entity.id} has ${followers.length} followers.`)
 
                 let cckv = channel
 

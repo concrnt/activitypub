@@ -18,7 +18,7 @@ const federation = createFederation({
 
 federation
     .setInboxListeners("/ap/users/{identifier}/inbox", "/inbox")
-    .on(Follow, async (ctx, follow) => {
+  .on(Follow, async (ctx, follow) => {
 
         const object = ctx.parseUri(follow.objectId);
         if (object == null || object.type !== "actor") {
@@ -47,6 +47,14 @@ federation
             subscriberInbox: follower.inboxId.toString(),
             subscriberSharedInbox: follower.endpoints?.sharedInbox?.toString(),
         })
+        .onConflictDoUpdate({
+            target: [apFollow.publisherId, apFollow.subscriberId],
+            set: {
+                accepted: true,
+                subscriberInbox: follower.inboxId.toString(),
+                subscriberSharedInbox: follower.endpoints?.sharedInbox?.toString(),
+            },
+        })
 
         const accept = new Accept({
             actor: follow.objectId,
@@ -57,8 +65,11 @@ federation
         await ctx.sendActivity(object, follower, accept);
     })
     .on(Undo, async (ctx, undo) => {
+        console.log("Received Undo activity:", undo);
         const object = await undo.getObject();
+        console.log("Parsed object from Undo activity:", object);
         if (object instanceof Follow) {
+            console.log("Undoing Follow activity:", object);
             if (undo.actorId == null || undo.objectId == null) return
             const parsed = ctx.parseUri(object.objectId);
             if (parsed == null || parsed.type !== "actor") return;
@@ -77,7 +88,9 @@ federation
         } else {
             logger.warn(`Received Undo activity with unsupported object: ${object}`);
         }
-    });
+    })
+;
+
 
 federation.setActorDispatcher("/ap/users/{identifier}", async (ctx, identifier) => {
 
@@ -97,6 +110,7 @@ federation.setActorDispatcher("/ap/users/{identifier}", async (ctx, identifier) 
         url: ctx.getActorUri(identifier),
         publicKey: keys[0]?.cryptographicKey,
         assertionMethods: keys.map((k) => k.multikey),
+        followers: ctx.getFollowersUri(identifier),
     });
 
 }).setKeyPairsDispatcher(async (ctx, identifier) => {
@@ -139,6 +153,7 @@ federation.setFollowersDispatcher(
         .where(eq(apFollow.publisherId, identifier))
         .then(followers => followers.length)
 });
+
 
 federation.setObjectDispatcher(
     Note,

@@ -15,6 +15,13 @@
       "when": 1777455422049,
       "tag": "0001_sad_morph",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777457777800,
+      "tag": "0002_brave_paibok",
+      "breakpoints": true
     }
   ]
 }

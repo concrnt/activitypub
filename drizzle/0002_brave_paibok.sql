@@ -1,0 +1,1 @@
+ALTER TABLE "ap_follows" ADD CONSTRAINT "unique_follow" UNIQUE("publisher_id","subscriber_id");

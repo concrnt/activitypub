@@ -1,0 +1,137 @@
+{
+  "id": "6586ce4f-7f98-493f-9546-9d84bad9d0da",
+  "prevId": "e25c6b0d-99e7-4b76-8f02-a0b2453c8cf8",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.ap_entities": {
+      "name": "ap_entities",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "ccid": {
+          "name": "ccid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "publickey": {
+          "name": "publickey",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "privatekey": {
+          "name": "privatekey",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "c_date": {
+          "name": "c_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "ap_entities_ccid_unique": {
+          "name": "ap_entities_ccid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "ccid"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.ap_follows": {
+      "name": "ap_follows",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "accepted": {
+          "name": "accepted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "publisher_id": {
+          "name": "publisher_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subscriber_id": {
+          "name": "subscriber_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subscriber_inbox": {
+          "name": "subscriber_inbox",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subscriber_shared_inbox": {
+          "name": "subscriber_shared_inbox",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "unique_follow": {
+          "name": "unique_follow",
+          "nullsNotDistinct": false,
+          "columns": [
+            "publisher_id",
+            "subscriber_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
