@@ -1,7 +1,9 @@
 import { db, apEntity, apFollow, type ApEntity } from './db/index.ts';
 import { Redis } from "ioredis";
 import { eq } from "drizzle-orm";
-import { federation } from '@fedify/hono';
+import fedi from "./federation.ts";
+import { resolveConcrntDocument } from './concrnt.ts';
+import { Create, Note } from '@fedify/vocab';
 
 let entities: ApEntity[] = [];
 
@@ -41,15 +43,38 @@ export const startEntityBroker = async () => {
 
                 console.log(`Entity ${entity.id} has followers:`, followers);
 
+                let cckv = channel
 
+                const sd = await resolveConcrntDocument(channel);
+                if (!sd) {
+                    console.error(`Failed to resolve Concrnt document for channel ${channel}`);
+                    return;
+                }
+
+                const document = JSON.parse(sd.document);
+                if (document.schema === "https://schema.concrnt.net/reference.json") {
+                    cckv = document.value.href
+                }
+
+                const baseURL = new URL('https://cc2.tunnel.anthrotech.dev')
+                const ctx = fedi.createContext(baseURL, undefined)
+                const noteArgs = { identifier: entity.id, id: cckv }
+                const noteURL = ctx.getObjectUri(Note, noteArgs)
+                const note = await ctx.lookupObject(noteURL)
+
+                await ctx.sendActivity(
+                    { identifier: entity.id },
+                    "followers",
+                    new Create({
+                        id: new URL("#activity", note?.id ?? undefined),
+                        object: note,
+                        actors: note?.attributionIds,
+                        tos: note?.toIds,
+                        ccs: note?.ccIds,
+                    }),
+                )
             }
-
         })
-
     });
-
 }
-
-
-
 
