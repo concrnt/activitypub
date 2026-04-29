@@ -1,5 +1,5 @@
 import { createFederation, exportJwk, generateCryptoKeyPair } from "@fedify/fedify";
-import { Person, Follow, Endpoints, Accept, Undo, Note, PUBLIC_COLLECTION, type Recipient, isActor } from "@fedify/vocab";
+import { Person, Follow, Endpoints, Accept, Undo, Note, PUBLIC_COLLECTION, type Recipient, isActor, Create, Like } from "@fedify/vocab";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
 import { Redis } from "ioredis";
@@ -136,6 +136,12 @@ federation
                     accepted: true,
                 },
             });
+    })
+    .on(Create, async (ctx, create) => {
+        console.log("Received Create activity:", create);
+    })
+    .on(Like, async (ctx, like) => {
+        console.log("Received Like activity:", like);
     })
 ;
 
