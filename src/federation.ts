@@ -1,9 +1,9 @@
-import { createFederation } from "@fedify/fedify";
+import { createFederation, exportJwk, generateCryptoKeyPair } from "@fedify/fedify";
 import { Person, Follow, Endpoints, Accept, Undo, Note, PUBLIC_COLLECTION, type Recipient, isActor } from "@fedify/vocab";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
 import { Redis } from "ioredis";
-import { db, apEntity, apFollow } from './db/index.ts';
+import { db, apEntity, apFollow, apKeys } from './db/index.ts';
 import { importJwk } from "@fedify/fedify";
 import { eq, and } from "drizzle-orm";
 import { resolveConcrntDocument, type Document } from "./concrnt.ts";
@@ -154,6 +154,37 @@ federation.setActorDispatcher("/ap/users/{identifier}", async (ctx, identifier) 
 
 }).setKeyPairsDispatcher(async (ctx, identifier) => {
 
+
+    const keys = await db.select().from(apKeys).where(eq(apKeys.ownerId, identifier));
+
+    const pairs: CryptoKeyPair[] = []
+
+    for (const keyType of ["RSASSA-PKCS1-v1_5", "Ed25519"] as const) {
+        const key = keys.find(k => k.keyType === keyType);
+        if (key == null) {
+            logger.debug(
+                `The user ${identifier} does not have a ${keyType} key; creating one...`,
+            );
+            const { privateKey, publicKey } = await generateCryptoKeyPair(keyType);
+            await db.insert(apKeys).values({
+                ownerId: identifier,
+                keyType,
+                private: JSON.stringify(await exportJwk(privateKey)),
+                public: JSON.stringify(await exportJwk(publicKey)),
+            });
+            pairs.push({ privateKey, publicKey });
+        } else {
+            pairs.push({
+                privateKey: await importJwk(JSON.parse(key.private), "private"),
+                publicKey: await importJwk(JSON.parse(key.public), "public"),
+            });
+        }
+    }
+
+    return pairs;
+
+
+    /*
     const users = await db.select().from(apEntity).where(eq(apEntity.id, identifier)).limit(1);
     if (users.length === 0) {
         console.warn(`No user found for identifier: ${identifier}`);
@@ -170,6 +201,60 @@ federation.setActorDispatcher("/ap/users/{identifier}", async (ctx, identifier) 
         privateKey: await importJwk(JSON.parse(user.privateKey), "private"),
         publicKey: await importJwk(JSON.parse(user.publicKey), "public"),
     }]
+    */
+
+   /*
+    const user = db
+      .prepare<unknown[], User>("SELECT * FROM users WHERE username = ?")
+      .get(identifier);
+    if (user == null) return [];
+    const rows = db
+      .prepare<unknown[], Key>("SELECT * FROM keys WHERE keys.user_id = ?")
+      .all(user.id);
+    const keys = Object.fromEntries(
+      rows.map((row) => [row.type, row]),
+    ) as Record<Key["type"], Key>;
+    const pairs: CryptoKeyPair[] = [];
+    // For each of the two key formats (RSASSA-PKCS1-v1_5 and Ed25519) that
+    // the actor supports, check if they have a key pair, and if not,
+    // generate one and store it in the database:
+    for (const keyType of ["RSASSA-PKCS1-v1_5", "Ed25519"] as const) {
+      if (keys[keyType] == null) {
+        logger.debug(
+          "The user {identifier} does not have an {keyType} key; creating one...",
+          { identifier, keyType },
+        );
+        const { privateKey, publicKey } = await generateCryptoKeyPair(keyType);
+        db.prepare(
+          `
+          INSERT INTO keys (user_id, type, private_key, public_key)
+          VALUES (?, ?, ?, ?)
+          `,
+        ).run(
+          user.id,
+          keyType,
+          JSON.stringify(await exportJwk(privateKey)),
+          JSON.stringify(await exportJwk(publicKey)),
+        );
+        pairs.push({ privateKey, publicKey });
+      } else {
+        pairs.push({
+          privateKey: await importJwk(
+            JSON.parse(keys[keyType].private_key),
+            "private",
+          ),
+          publicKey: await importJwk(
+            JSON.parse(keys[keyType].public_key),
+            "public",
+          ),
+        });
+      }
+    }
+    return pairs;
+    */
+
+
+
 
 });
 

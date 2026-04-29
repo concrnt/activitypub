@@ -5,7 +5,6 @@ import { getLogger } from "@logtape/logtape";
 import fedi from "./federation.ts";
 import { Person, Note, isActor, Follow } from "@fedify/vocab";
 import { db, apEntity } from "./db"
-import { generateCryptoKeyPair, exportJwk } from "@fedify/fedify";
 import { resolveConcrntDocument } from "./concrnt.ts";
 import { eq, and } from "drizzle-orm";
 
@@ -69,14 +68,10 @@ app.post("/ap/api/setup", async (c) => {
 
     console.log("Setting up ActivityPub entity for id:", ccid);
 
-    const { privateKey, publicKey } = await generateCryptoKeyPair("RSASSA-PKCS1-v1_5");
-
     await db.insert(apEntity).values({
         id: id,
         ccid: ccid,
         enabled: true,
-        publicKey: JSON.stringify(await exportJwk(publicKey)),
-        privateKey: JSON.stringify(await exportJwk(privateKey)),
     })
 
 });
