@@ -12,11 +12,11 @@ import { Temporal } from "@js-temporal/polyfill";
 const logger = getLogger("activitypub");
 
 const federation = createFederation({
-  kv: new RedisKvStore(new Redis(process.env.REDIS_URL)),
-  queue: new RedisMessageQueue(() => new Redis(process.env.REDIS_URL)),
+    kv: new RedisKvStore(new Redis(process.env.REDIS_URL)),
+    queue: new RedisMessageQueue(() => new Redis(process.env.REDIS_URL)),
 });
 
-federation.setNodeInfoDispatcher("/nodeinfo/2.1", async (ctx) => {
+federation.setNodeInfoDispatcher("/ap/nodeinfo/2.1", async (ctx) => {
     return {
         software: {
             name: "concrnt-ap-bridge",
@@ -35,8 +35,8 @@ federation.setNodeInfoDispatcher("/nodeinfo/2.1", async (ctx) => {
 })
 
 federation
-    .setInboxListeners("/ap/users/{identifier}/inbox", "/inbox")
-  .on(Follow, async (ctx, follow) => {
+    .setInboxListeners("/ap/users/{identifier}/inbox", "/ap/inbox")
+    .on(Follow, async (ctx, follow) => {
 
         const object = ctx.parseUri(follow.objectId);
         if (object == null || object.type !== "actor") {
@@ -110,23 +110,32 @@ federation
     .on(Accept, async (ctx, accept) => {
         console.log("Received Accept activity:", accept);
 
-        const follow = await accept.getObject()
+        console.log("Parsing object from Accept activity...");
+        const follow = await accept.getObject({ crossOrigin: 'trust' });
         if (!(follow instanceof Follow)) return
-
-        const following = await accept.getActor()
-        if (!isActor(following)) return
 
         const followerId = follow.actorId
         if (followerId == null) return
+        const parsed = ctx.parseUri(followerId)
+        if (parsed == null || parsed.type !== "actor") return
+        const followerIdentifier = parsed.identifier
 
-        /*
-        await db.insert(apFollow).values({
-            accepted: true,
-            publisherId: follow.objectId.toString(),
-            subscriberId: followerId.toString(),
-        })
-        */
+        const followTarget = follow.objectId
+        if (followTarget == null) return
 
+        await db
+            .insert(apFollow)
+            .values({
+                accepted: true,
+                publisherId: followTarget.toString(),
+                subscriberId: followerIdentifier,
+            })
+            .onConflictDoUpdate({
+                target: [apFollow.publisherId, apFollow.subscriberId],
+                set: {
+                    accepted: true,
+                },
+            });
     })
 ;
 
@@ -182,80 +191,6 @@ federation.setActorDispatcher("/ap/users/{identifier}", async (ctx, identifier) 
     }
 
     return pairs;
-
-
-    /*
-    const users = await db.select().from(apEntity).where(eq(apEntity.id, identifier)).limit(1);
-    if (users.length === 0) {
-        console.warn(`No user found for identifier: ${identifier}`);
-        return [];
-    }
-    
-    const user = users[0];
-    if (!user.publicKey || !user.privateKey) {
-        console.warn(`User ${identifier} does not have valid keys`);
-        return [];
-    }
-
-    return [{
-        privateKey: await importJwk(JSON.parse(user.privateKey), "private"),
-        publicKey: await importJwk(JSON.parse(user.publicKey), "public"),
-    }]
-    */
-
-   /*
-    const user = db
-      .prepare<unknown[], User>("SELECT * FROM users WHERE username = ?")
-      .get(identifier);
-    if (user == null) return [];
-    const rows = db
-      .prepare<unknown[], Key>("SELECT * FROM keys WHERE keys.user_id = ?")
-      .all(user.id);
-    const keys = Object.fromEntries(
-      rows.map((row) => [row.type, row]),
-    ) as Record<Key["type"], Key>;
-    const pairs: CryptoKeyPair[] = [];
-    // For each of the two key formats (RSASSA-PKCS1-v1_5 and Ed25519) that
-    // the actor supports, check if they have a key pair, and if not,
-    // generate one and store it in the database:
-    for (const keyType of ["RSASSA-PKCS1-v1_5", "Ed25519"] as const) {
-      if (keys[keyType] == null) {
-        logger.debug(
-          "The user {identifier} does not have an {keyType} key; creating one...",
-          { identifier, keyType },
-        );
-        const { privateKey, publicKey } = await generateCryptoKeyPair(keyType);
-        db.prepare(
-          `
-          INSERT INTO keys (user_id, type, private_key, public_key)
-          VALUES (?, ?, ?, ?)
-          `,
-        ).run(
-          user.id,
-          keyType,
-          JSON.stringify(await exportJwk(privateKey)),
-          JSON.stringify(await exportJwk(publicKey)),
-        );
-        pairs.push({ privateKey, publicKey });
-      } else {
-        pairs.push({
-          privateKey: await importJwk(
-            JSON.parse(keys[keyType].private_key),
-            "private",
-          ),
-          publicKey: await importJwk(
-            JSON.parse(keys[keyType].public_key),
-            "public",
-          ),
-        });
-      }
-    }
-    return pairs;
-    */
-
-
-
-
 });
 
 federation.setFollowersDispatcher(

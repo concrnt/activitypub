@@ -7,6 +7,7 @@ import { Person, Note, isActor, Follow } from "@fedify/vocab";
 import { db, apEntity } from "./db"
 import { resolveConcrntDocument } from "./concrnt.ts";
 import { eq, and } from "drizzle-orm";
+import { apFollow } from "./db/schema.ts";
 
 const logger = getLogger("activitypub");
 
@@ -98,9 +99,6 @@ app.post("/ap/api/follow", async (c) => {
         return c.json({ error: "Target URI does not resolve to an actor" }, 400);
     }
 
-    console.log('from:', ctx.getActorUri(entity.id));
-    console.log('to:', actor.id);
-
     await ctx.sendActivity(
         { identifier: entity.id },
         actor,
@@ -108,8 +106,18 @@ app.post("/ap/api/follow", async (c) => {
             actor: ctx.getActorUri(entity.id),
             object: actor.id,
             to: actor.id,
-        })
+        }),
+        { excludeBaseUris: [new URL(ctx.origin)] }
     )
+
+    await db
+        .insert(apFollow)
+        .values({
+            accepted: false,
+            publisherId: actor.id.toString(),
+            subscriberId: entity.id,
+        })
+        .onConflictDoNothing();
 
     return c.text("Follow request sent to " + target);
 });
