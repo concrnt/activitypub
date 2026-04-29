@@ -6,37 +6,96 @@ import fedi from "./federation.ts";
 import { Person, Note } from "@fedify/vocab";
 import { db, apEntity } from "./db"
 import { generateCryptoKeyPair, exportJwk } from "@fedify/fedify";
+import { resolveConcrntDocument } from "./concrnt.ts";
 
 const logger = getLogger("activitypub");
+
+
+const receiveAuthInfo = (c: any) => {
+    const authInfoStr = c.req.header("cc-requester")
+    const authInfo = authInfoStr ? JSON.parse(authInfoStr) : null;
+    logger.info("Received request with auth info:", authInfo);
+    return authInfo;
+}
+
 
 const app = new Hono();
 app.use(federation(fedi, () => undefined));
 
-app.get("/", (c) => c.text("Hello, Fedify!"));
+app.get("/ap", (c) => c.text("Hello, Fedify!"));
 
-app.get("/api/test", async (c) => {
-    return c.json({ message: "Hello from the API!" });
-});
+app.get("/ap/concrnt", async (c) => {
 
-app.post("/api/setup", async (c) => {
-    const { username } = await c.req.json();
+    const uri = c.req.query("uri")?.trim();
+    console.log("Received request for URI:", uri);
 
-    if (typeof username !== "string" || !username.trim()) {
-        return c.json({ error: "Invalid 'username' in request body" }, 400);
+    if (!uri) {
+        return c.json({ error: "Missing 'uri' query parameter" }, 400);
     }
 
-    console.log("Setting up ActivityPub entity for username:", username);
+    const sd = await resolveConcrntDocument(uri);
+    console.log("Resolved Concrnt document:", sd);
+
+    return c.json({ 
+        message: "Hello from the API!",
+    });
+});
+
+
+app.get("/ap/test", async (c) => {
+
+    const authInfo = receiveAuthInfo(c);
+
+    return c.json({ 
+        message: "Hello from the API!",
+        authInfo,
+    });
+});
+
+app.post("/ap/api/setup", async (c) => {
+
+    const authInfo = receiveAuthInfo(c)
+    if (!authInfo) {
+        return c.json({ error: "Missing authentication information" }, 400);
+    }
+
+    const { id } = await c.req.json();
+    if (!id) {
+        return c.json({ error: "Missing 'id' in request body" }, 400);
+    }
+
+    const ccid = authInfo.ccid
+
+    console.log("Setting up ActivityPub entity for id:", ccid);
 
     const { privateKey, publicKey } = await generateCryptoKeyPair("RSASSA-PKCS1-v1_5");
 
     await db.insert(apEntity).values({
-        id: username,
+        id: id,
+        ccid: ccid,
+        enabled: true,
         publicKey: JSON.stringify(await exportJwk(publicKey)),
         privateKey: JSON.stringify(await exportJwk(privateKey)),
     })
+
 });
 
-app.get("/api/resolve", async (c) => {
+app.post("/ap/api/follow", async (c) => {
+
+    const authInfo = receiveAuthInfo(c)
+    if (!authInfo) {
+        return c.json({ error: "Missing authentication information" }, 400);
+    }
+
+    const id = authInfo.ccid
+
+    const { targetURI } = await c.req.json();
+
+    // TODO
+
+});
+
+app.get("/ap/api/resolve", async (c) => {
     const ctx = fedi.createContext(c.req.raw, undefined);
     const uri = c.req.query("uri")?.trim();
     console.log("Resolving URI:", uri);

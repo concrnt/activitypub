@@ -1,18 +1,25 @@
 import { boolean, pgTable, text, date, serial } from 'drizzle-orm/pg-core'
 
 export const apEntity = pgTable("ap_entities", {
-    id: text("id").primaryKey(),
-    ccid: text("ccid").unique(),
-    enabled: boolean("enabled"),
-    publicKey: text("publickey"),
-    privateKey: text("privatekey"),
-    cDate: date("c_date").defaultNow(),
+    id: text("id").notNull().primaryKey(),
+    ccid: text("ccid").notNull().unique(),
+    enabled: boolean("enabled").notNull().default(true),
+    publicKey: text("publickey").notNull(),
+    privateKey: text("privatekey").notNull(),
+    cDate: date("c_date").notNull().defaultNow(),
 });
 
+export type ApEntity = typeof apEntity.$inferSelect;
+
 export const apFollow = pgTable("ap_follows", {
-    id: serial("id").primaryKey(),
-    accepted: boolean("accepted").default(false),
-    publisherId: text("publisher_id"),
-    subscriberId: text("subscriber_id"),
+    id: serial("id").notNull().primaryKey(),
+    accepted: boolean("accepted").notNull().default(false),
+    publisherId: text("publisher_id").notNull(),
+
+    subscriberId: text("subscriber_id").notNull(),
+    subscriberInbox: text("subscriber_inbox"),
+    subscriberSharedInbox: text("subscriber_shared_inbox"),
 });
+
+export type ApFollow = typeof apFollow.$inferSelect;
 
