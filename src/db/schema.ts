@@ -3,6 +3,7 @@ import { boolean, pgTable, text, date, primaryKey } from 'drizzle-orm/pg-core'
 export const apEntity = pgTable("ap_entities", {
     id: text("id").notNull().primaryKey(),
     ccid: text("ccid").notNull().unique(),
+    listenTimelines: text("listen_timelines").array().notNull().default([]),
     enabled: boolean("enabled").notNull().default(true),
     cDate: date("c_date").notNull().defaultNow(),
 });

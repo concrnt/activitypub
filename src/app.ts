@@ -1,5 +1,6 @@
 // @ts-nocheck this file is just a template
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { federation } from "@fedify/hono";
 import { getLogger } from "@logtape/logtape";
 import fedi from "./federation.ts";
@@ -22,6 +23,11 @@ const receiveAuthInfo = (c: any) => {
 
 const app = new Hono();
 app.use(federation(fedi, () => undefined));
+app.use(cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+}));
 
 app.get("/ap", (c) => c.text("Hello, Fedify!"));
 
@@ -70,12 +76,111 @@ app.post("/ap/api/setup", async (c) => {
     console.log("Setting up ActivityPub entity for id:", ccid);
 
     await db.insert(apEntity).values({
+        id: id.toLowerCase(),
+        ccid: ccid,
+        enabled: true,
+        listenTimelines: [],
+    })
+
+    return c.json({
         id: id,
         ccid: ccid,
         enabled: true,
+        listenTimelines: [],
     })
 
 });
+
+app.get("/ap/api/settings", async (c) => {
+
+    const authInfo = receiveAuthInfo(c)
+    if (!authInfo) {
+        return c.json({ error: "Missing authentication information" }, 400);
+    }
+
+    const id = authInfo.ccid
+
+    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, id)).limit(1).then(res => res[0]);
+    if (!entity) {
+        return c.json({ error: "No ActivityPub entity found for this user" }, 404);
+    }
+
+    return c.json({
+        ccid: entity.ccid,
+        id: entity.id,
+        enabled: entity.enabled,
+        listenTimelines: entity.listenTimelines,
+    });
+});
+
+app.post("/ap/api/settings", async (c) => {
+
+    const authInfo = receiveAuthInfo(c)
+    if (!authInfo) {
+        return c.json({ error: "Missing authentication information" }, 400);
+    }
+
+    const id = authInfo.ccid
+
+    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, id)).limit(1).then(res => res[0]);
+    if (!entity) {
+        return c.json({ error: "No ActivityPub entity found for this user" }, 404);
+    }
+
+    const { listenTimelines } = await c.req.json();
+
+    await db.update(apEntity)
+        .set({
+            listenTimelines: listenTimelines ?? entity.listenTimelines,
+        })
+        .where(eq(apEntity.ccid, id));
+
+    return c.json({ message: "Settings updated successfully" });
+});
+
+
+app.get("/ap/api/followers", async (c) => {
+
+    const authInfo = receiveAuthInfo(c)
+    if (!authInfo) {
+        return c.json({ error: "Missing authentication information" }, 400);
+    }
+
+    const id = authInfo.ccid
+
+    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, id)).limit(1).then(res => res[0]);
+    if (!entity) {
+        return c.json({ error: "No ActivityPub entity found for this user" }, 404);
+    }
+
+    const followers = await db.select().from(apFollow)
+        .where(eq(apFollow.publisherId, entity.id))
+        .then(followers => followers.map(f => f.subscriberId));
+
+    return c.json(followers);
+});
+
+app.get("/ap/api/following", async (c) => {
+
+    const authInfo = receiveAuthInfo(c)
+    if (!authInfo) {
+        return c.json({ error: "Missing authentication information" }, 400);
+    }
+
+    const id = authInfo.ccid
+
+    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, id)).limit(1).then(res => res[0]);
+    if (!entity) {
+        return c.json({ error: "No ActivityPub entity found for this user" }, 404);
+    }
+
+    const following = await db.select().from(apFollow)
+        .where(eq(apFollow.subscriberId, entity.id))
+        .then(following => following.map(f => f.publisherId));
+
+    return c.json(following);
+});
+
 
 app.post("/ap/api/follow", async (c) => {
 
@@ -119,7 +224,7 @@ app.post("/ap/api/follow", async (c) => {
         })
         .onConflictDoNothing();
 
-    return c.text("Follow request sent to " + target);
+    return c.json({ message: "Follow request sent to " + target });
 });
 
 app.post("/ap/api/unfollow", async (c) => {
@@ -167,7 +272,7 @@ app.post("/ap/api/unfollow", async (c) => {
             )
         );
 
-    return c.text("Unfollow request sent to " + target);
+    return c.json({ message: "Unfollow request sent to " + target });
 });
 
 
@@ -178,7 +283,7 @@ app.get("/ap/api/resolve", async (c) => {
     if (typeof uri !== "string") {
         return c.json({ error: "Missing 'uri' query parameter" }, 400);
     }
-    return await ctx.lookupObject(uri).then(async (obj) => {
+    return await ctx.lookupObject(uri, {crossOrigin: 'trust'}).then(async (obj) => {
         if (obj) {
             /*
             console.log(obj)
@@ -193,7 +298,7 @@ app.get("/ap/api/resolve", async (c) => {
             } else {
                 console.log("Resolved object of type:", obj);
             }
-            return c.json(obj);
+            return c.json(await obj.toJsonLd());
         } else {
             console.log("Object not found for URI:", uri);
             return c.json({ error: "Object not found" }, 404);
