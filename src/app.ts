@@ -6,7 +6,6 @@ import { getLogger } from "@logtape/logtape";
 import fedi from "./federation.ts";
 import { Person, Note, isActor, Follow, Undo } from "@fedify/vocab";
 import { db, apEntity } from "./db"
-import { resolveConcrntDocument } from "./concrnt.ts";
 import { eq, and } from "drizzle-orm";
 import { apFollow } from "./db/schema.ts";
 
@@ -29,24 +28,21 @@ app.use(cors({
     allowHeaders: ["Content-Type", "Authorization"],
 }));
 
+interface ApServerInfo {
+    serviceAccountId: string
+}
+
 app.get("/ap", (c) => c.text("Hello, Fedify!"));
 
-app.get("/ap/concrnt", async (c) => {
+app.get("/ap/api/info", async (c) => {
 
-    const uri = c.req.query("uri")?.trim();
-    console.log("Received request for URI:", uri);
+    const serverInfo: ApServerInfo = {
+        serviceAccountId: process.env.CONCRNT_CCID,
+    };
 
-    if (!uri) {
-        return c.json({ error: "Missing 'uri' query parameter" }, 400);
-    }
-
-    const sd = await resolveConcrntDocument(uri);
-    console.log("Resolved Concrnt document:", sd);
-
-    return c.json({ 
-        message: "Hello from the API!",
-    });
+    return c.json(serverInfo);
 });
+
 
 
 app.get("/ap/test", async (c) => {

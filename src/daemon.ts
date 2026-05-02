@@ -2,8 +2,9 @@ import { db, apEntity, apFollow, type ApEntity } from './db/index.ts';
 import { Redis } from "ioredis";
 import { eq } from "drizzle-orm";
 import fedi from "./federation.ts";
-import { resolveConcrntDocument } from './concrnt.ts';
 import { Create, Note } from '@fedify/vocab';
+
+import concrntApi from "./concrnt.ts";
 
 let entities: ApEntity[] = [];
 
@@ -43,13 +44,12 @@ export const startEntityBroker = async () => {
 
                 let cckv = channel
 
-                const sd = await resolveConcrntDocument(channel);
-                if (!sd) {
-                    console.error(`Failed to resolve Concrnt document for channel ${channel}`);
-                    return;
+                const document = await concrntApi.getDocument<any>(channel);
+
+                if (document.author != entity.ccid) {
+                    return
                 }
 
-                const document = JSON.parse(sd.document);
                 if (document.schema === "https://schema.concrnt.net/reference.json") {
                     cckv = document.value.href
                 }

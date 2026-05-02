@@ -1,13 +1,19 @@
 import { createFederation, exportJwk, generateCryptoKeyPair } from "@fedify/fedify";
-import { Person, Follow, Endpoints, Accept, Undo, Note, PUBLIC_COLLECTION, type Recipient, isActor, Create, Like } from "@fedify/vocab";
+import { Person, Follow, Endpoints, Accept, Undo, Note, PUBLIC_COLLECTION, type Recipient, Create, Like, getTypeId } from "@fedify/vocab";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
 import { Redis } from "ioredis";
 import { db, apEntity, apFollow, apKeys } from './db/index.ts';
 import { importJwk } from "@fedify/fedify";
 import { eq, and } from "drizzle-orm";
-import { resolveConcrntDocument, type Document } from "./concrnt.ts";
 import { Temporal } from "@js-temporal/polyfill";
+import { CDID, type Document } from '@concrnt/client'
+
+import concrntApi from "./concrnt.ts";
+
+const commit = async (document: Document<any>) => {
+    await concrntApi.commit(document, concrntApi.defaultHost, { useMasterkey: true })
+}
 
 const logger = getLogger("activitypub");
 
@@ -139,6 +145,60 @@ federation
     })
     .on(Create, async (ctx, create) => {
         console.log("Received Create activity:", create);
+
+        const actorId = create.actorId;
+        if (actorId == null) {
+            logger.warn(`Received Create activity with missing actor ID`);
+            return;
+        }
+
+        const followers = await db.select().from(apFollow)
+            .where(eq(apFollow.publisherId, actorId.toString()));
+
+        if (followers.length === 0) {
+            logger.info(`Actor ${actorId} has no followers. Skipping Create activity.`);
+            return;
+        }
+
+        const object = await create.getObject();
+        if (object == null) {
+            logger.warn(`Received Create activity with missing object`);
+            return;
+        }
+
+        const objectUri = object.id?.toString();
+        if (objectUri == null) {
+            logger.warn(`Received Create activity with object missing ID`);
+            return;
+        }
+
+        const objectUriHash = CDID.makeHash(new TextEncoder().encode(objectUri)).toString();
+
+        const activifiedUri = objectUri.replace(/^https?:\/\/[^\/]+/, "activity://");
+
+        for (const follower of followers) {
+
+            const entity = await db.select().from(apEntity).where(eq(apEntity.id, follower.subscriberId)).limit(1).then(res => res[0]);
+            if (!entity) {
+                logger.warn(`No entity found for publisher ID: ${follower.publisherId}`);
+                continue;
+            }
+
+            const document = {
+                key: `cckv://${entity.ccid}/activitypub.concrnt.world/inbox/${objectUriHash}`,
+                schema: "https://schema.concrnt.net/reference.json",
+                value: {
+                    href: activifiedUri,
+                    schema: getTypeId(object).toString(),
+                    createdAt: object.published?.toString() ?? new Date().toISOString(),
+                },
+                author: process.env.CONCRNT_CCID!,
+                createdAt: new Date(),
+            }
+
+            await commit(document);
+        }
+
     })
     .on(Like, async (ctx, like) => {
         console.log("Received Like activity:", like);
@@ -249,8 +309,7 @@ federation.setObjectDispatcher(
             return null;
         }
 
-        const sd = await resolveConcrntDocument(values.id);
-        const document: Document<any> = JSON.parse(sd.document)
+        const document = await concrntApi.getDocument<any>(values.id)
 
         return new Note({
             id: ctx.getObjectUri(Note, values),

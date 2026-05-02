@@ -6,6 +6,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@concrnt/client": "2.0.1",
     "@dotenvx/dotenvx": "^1.14.1",
     "@fedify/fedify": "2.2.0",
     "@fedify/hono": "2.2.0",
