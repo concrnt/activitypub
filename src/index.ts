@@ -4,12 +4,13 @@ import { behindProxy } from "x-forwarded-fetch";
 import app from "./app.ts";
 import "./logging.ts";
 import { startEntityBroker } from "./daemon.ts";
+import { config } from "./config.ts";
 
 startEntityBroker()
 
 serve(
   {
-    port: 8008,
+    port: config.server.port,
     fetch: behindProxy(app.fetch.bind(app)),
   },
   (info) =>

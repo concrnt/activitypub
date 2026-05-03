@@ -8,6 +8,7 @@ import { Person, Note, isActor, Follow, Undo } from "@fedify/vocab";
 import { db, apEntity } from "./db"
 import { eq, and } from "drizzle-orm";
 import { apFollow } from "./db/schema.ts";
+import { config } from "./config.ts";
 
 const logger = getLogger("activitypub");
 
@@ -37,7 +38,7 @@ app.get("/ap", (c) => c.text("Hello, Fedify!"));
 app.get("/ap/api/info", async (c) => {
 
     const serverInfo: ApServerInfo = {
-        serviceAccountId: process.env.CONCRNT_CCID,
+        serviceAccountId: config.concrnt.ccid,
     };
 
     return c.json(serverInfo);
@@ -274,11 +275,13 @@ app.post("/ap/api/unfollow", async (c) => {
 
 app.get("/ap/api/resolve", async (c) => {
     const ctx = fedi.createContext(c.req.raw, undefined);
-    const uri = c.req.query("uri")?.trim();
-    console.log("Resolving URI:", uri);
+    let uri = c.req.query("uri")?.trim();
     if (typeof uri !== "string") {
         return c.json({ error: "Missing 'uri' query parameter" }, 400);
     }
+    uri = decodeURIComponent(uri);
+    uri = uri.replace(/^activity:\/\//, "https://");
+
     return await ctx.lookupObject(uri, {crossOrigin: 'trust'}).then(async (obj) => {
         if (obj) {
             /*

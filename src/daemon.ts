@@ -5,6 +5,7 @@ import fedi from "./federation.ts";
 import { Create, Note } from '@fedify/vocab';
 
 import concrntApi from "./concrnt.ts";
+import { config } from "./config.ts";
 
 let entities: ApEntity[] = [];
 
@@ -14,7 +15,7 @@ const updateEntities = async () => {
 
 export const startEntityBroker = async () => {
 
-    const redis = new Redis(process.env.REDIS_URL);
+    const redis = new Redis(config.redis.url);
 
     updateEntities(); // Initial load of entities
     setInterval(updateEntities, 60000); // Update entities every 60 seconds
@@ -54,7 +55,7 @@ export const startEntityBroker = async () => {
                     cckv = document.value.href
                 }
 
-                const baseURL = new URL('https://cc2.tunnel.anthrotech.dev')
+                const baseURL = new URL(config.activitypub.baseUrl)
                 const ctx = fedi.createContext(baseURL, undefined)
                 const noteArgs = { identifier: entity.id, id: cckv }
                 const noteURL = ctx.getObjectUri(Note, noteArgs)
@@ -75,4 +76,3 @@ export const startEntityBroker = async () => {
         })
     });
 }
-

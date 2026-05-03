@@ -1,0 +1,14 @@
+server:
+  port: 8008
+
+database:
+  url: postgres://postgres:postgres@localhost:5432/postgres
+
+redis:
+  url: redis://localhost:6379
+
+concrnt:
+  ccid: your-service-account-ccid
+  domain: concrnt.example.com
+  privateKey: |
+    replace-with-your-concrnt-private-key

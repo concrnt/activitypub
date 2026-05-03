@@ -1,12 +1,12 @@
 import { Api, InMemoryAuthProvider, InMemoryKVS } from '@concrnt/client'
+import { config } from "./config.ts";
 
-const authProvider = new InMemoryAuthProvider(process.env.CONCRNT_PRIVATE);
+const authProvider = new InMemoryAuthProvider(config.concrnt.privateKey);
 const kvs = new InMemoryKVS();
 
-const api = new Api(process.env.CONCRNT_DOMAIN, authProvider, kvs)
+const api = new Api(config.concrnt.domain, authProvider, kvs)
 
 console.log("Concrnt API initialized");
-console.log("Concrnt API domain:", process.env.CONCRNT_DOMAIN);
+console.log("Concrnt API domain:", config.concrnt.domain);
 
 export default api;
-

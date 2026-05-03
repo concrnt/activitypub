@@ -10,6 +10,7 @@ import { Temporal } from "@js-temporal/polyfill";
 import { CDID, type Document } from '@concrnt/client'
 
 import concrntApi from "./concrnt.ts";
+import { config } from "./config.ts";
 
 const commit = async (document: Document<any>) => {
     await concrntApi.commit(document, concrntApi.defaultHost, { useMasterkey: true })
@@ -18,15 +19,15 @@ const commit = async (document: Document<any>) => {
 const logger = getLogger("activitypub");
 
 const federation = createFederation({
-    kv: new RedisKvStore(new Redis(process.env.REDIS_URL)),
-    queue: new RedisMessageQueue(() => new Redis(process.env.REDIS_URL)),
+    kv: new RedisKvStore(new Redis(config.redis.url)),
+    queue: new RedisMessageQueue(() => new Redis(config.redis.url)),
 });
 
 federation.setNodeInfoDispatcher("/ap/nodeinfo/2.1", async (ctx) => {
     return {
         software: {
             name: "concrnt-ap-bridge",
-            version: { major: 0, minor: 1, patch: 0 },
+            version: "0.1.0",
             homepage: new URL("https://github.com/concrnt/activitypub"),
         },
         protocols: ["activitypub"],
@@ -174,7 +175,7 @@ federation
 
         const objectUriHash = CDID.makeHash(new TextEncoder().encode(objectUri)).toString();
 
-        const activifiedUri = objectUri.replace(/^https?:\/\/[^\/]+/, "activity://");
+        const activifiedUri = objectUri.replace(/^https?:\/\//, "activity://");
 
         for (const follower of followers) {
 
@@ -192,7 +193,7 @@ federation
                     schema: getTypeId(object).toString(),
                     createdAt: object.published?.toString() ?? new Date().toISOString(),
                 },
-                author: process.env.CONCRNT_CCID!,
+                author: config.concrnt.ccid,
                 createdAt: new Date(),
             }
 

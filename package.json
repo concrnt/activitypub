@@ -1,13 +1,12 @@
 {
   "type": "module",
   "scripts": {
-    "dev": "dotenvx run -- tsx watch ./src/index.ts",
-    "prod": "dotenvx run -- node --import tsx ./src/index.ts",
+    "dev": "tsx watch ./src/index.ts",
+    "prod": "node --import tsx ./src/index.ts",
     "lint": "eslint ."
   },
   "dependencies": {
     "@concrnt/client": "2.0.1",
-    "@dotenvx/dotenvx": "^1.14.1",
     "@fedify/fedify": "2.2.0",
     "@fedify/hono": "2.2.0",
     "@fedify/redis": "2.2.0",
@@ -20,7 +19,8 @@
     "ioredis": "^5.4.1",
     "pg": "^8.18.0",
     "tsx": "^4.17.0",
-    "x-forwarded-fetch": "^0.2.0"
+    "x-forwarded-fetch": "^0.2.0",
+    "yaml": "2.8.2"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.4",
