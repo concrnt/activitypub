@@ -284,19 +284,6 @@ app.get("/ap/api/resolve", async (c) => {
 
     return await ctx.lookupObject(uri, {crossOrigin: 'trust'}).then(async (obj) => {
         if (obj) {
-            /*
-            console.log(obj)
-            console.log("===========")
-            console.log(await obj.toJsonLd())
-            console.log("===========")
-            */
-            if (obj instanceof Note) {
-                console.log("Resolved Note content:", obj.content);
-            } else if (obj instanceof Person) {
-                console.log("Resolved Person name:", obj.name);
-            } else {
-                console.log("Resolved object of type:", obj);
-            }
             return c.json(await obj.toJsonLd());
         } else {
             console.log("Object not found for URI:", uri);

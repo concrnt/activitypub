@@ -152,6 +152,11 @@ federation
             logger.warn(`Received Create activity with missing actor ID`);
             return;
         }
+        const actorUri = create.actorId?.toString();
+        if (actorUri == null) {
+            logger.warn(`Received Create activity with invalid actor ID: ${create.actorId}`);
+            return;
+        }
 
         const followers = await db.select().from(apFollow)
             .where(eq(apFollow.publisherId, actorId.toString()));
@@ -175,31 +180,32 @@ federation
 
         const objectUriHash = CDID.makeHash(new TextEncoder().encode(objectUri)).toString();
 
-        const activifiedUri = objectUri.replace(/^https?:\/\//, "activity://");
+        const distribution: string[] = []
 
         for (const follower of followers) {
-
             const entity = await db.select().from(apEntity).where(eq(apEntity.id, follower.subscriberId)).limit(1).then(res => res[0]);
             if (!entity) {
                 logger.warn(`No entity found for publisher ID: ${follower.publisherId}`);
                 continue;
             }
-
-            const document = {
-                key: `cckv://${entity.ccid}/activitypub.concrnt.world/inbox/${objectUriHash}`,
-                schema: "https://schema.concrnt.net/reference.json",
-                value: {
-                    href: activifiedUri,
-                    schema: getTypeId(object).toString(),
-                    createdAt: object.published?.toString() ?? new Date().toISOString(),
-                },
-                author: config.concrnt.ccid,
-                createdAt: new Date(),
-            }
-
-            await commit(document);
+            distribution.push(`cckv://${entity.ccid}/activitypub.concrnt.world/inbox`);
         }
 
+        const document: Document<any> = {
+            key: `cckv://${config.concrnt.ccid}/activitypub.concrnt.world/inbox/${objectUriHash}`,
+            schema: "https://schema.concrnt.world/ap/note.json",
+            value: {
+                "actorURL": actorUri,
+                "noteURL": objectUri
+            },
+            author: config.concrnt.ccid,
+            createdAt: object.published ? new Date(object.published.toString()) : new Date(),
+            distributes: distribution,
+        }
+
+        console.log("Committing document to Concrnt:", document);
+
+        await commit(document);
     })
     .on(Like, async (ctx, like) => {
         console.log("Received Like activity:", like);
