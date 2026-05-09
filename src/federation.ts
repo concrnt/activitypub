@@ -1,5 +1,5 @@
 import { createFederation, exportJwk, generateCryptoKeyPair } from "@fedify/fedify";
-import { Person, Follow, Endpoints, Accept, Undo, Note, PUBLIC_COLLECTION, type Recipient, Create, Like } from "@fedify/vocab";
+import { Person, Follow, Endpoints, Accept, Undo, Note, PUBLIC_COLLECTION, type Recipient, Create, Like, Delete } from "@fedify/vocab";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
 import { Redis } from "ioredis";
@@ -252,6 +252,33 @@ federation
 
         await commit(document);
 
+    })
+    .on(Delete, async (ctx, del) => {
+        console.log("Received Delete activity:", del);
+
+        const object = await del.getObject();
+        if (object == null) {
+            logger.warn(`Received Delete activity with missing object`);
+            return;
+        }
+        if (object.id == null) {
+            logger.warn(`Received Delete activity with object missing ID`);
+            return;
+        }
+
+        const objectUriHash = CDID.makeHash(new TextEncoder().encode(object.id.href)).toString();
+        const key = `cckv://${config.concrnt.ccid}/activitypub.concrnt.world/inbox/${objectUriHash}`;
+
+        const document: Document<any> = {
+            schema: "https://schema.concrnt.net/delete.json",
+            value: key,
+            author: config.concrnt.ccid,
+            createdAt: new Date(),
+        }
+
+        console.log("Committing delete document to Concrnt:", document);
+        
+        await commit(document);
     })
 ;
 
