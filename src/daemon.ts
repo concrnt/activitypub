@@ -2,7 +2,7 @@ import { db, apEntity, apFollow, type ApEntity } from './db/index.ts';
 import { Redis } from "ioredis";
 import { eq } from "drizzle-orm";
 import fedi from "./federation.ts";
-import { Create, isActor, Like, Note } from '@fedify/vocab';
+import { Create, Delete, isActor, Like, Note } from '@fedify/vocab';
 
 import concrntApi from "./concrnt.ts";
 import { config } from "./config.ts";
@@ -35,7 +35,7 @@ export const startEntityBroker = async () => {
 
         try {
             entities.forEach(async entity => {
-                const prefix = `cckv://${entity.ccid}/concrnt.world/profiles/main/home-timeline/`;
+                const prefix = `cckv://${entity.ccid}/concrnt.world/profiles/main/home-timeline`;
                 if (channel.startsWith(prefix)) {
 
                     const followers = await db.select().from(apFollow)
@@ -48,37 +48,58 @@ export const startEntityBroker = async () => {
 
                     console.log(`Entity ${entity.id} has ${followers.length} followers.`)
 
-                    const document = await concrntApi.getDocument<any>(channel);
-                    let cckv: string = document.key!
+                    const msg = JSON.parse(message);
+                    if (msg.type === "created") {
+                        console.log(`Received created message for ${channel}`);
 
-                    if (document.author != entity.ccid) {
-                        return
+                        const document = await concrntApi.getDocument<any>(channel);
+                        let cckv: string = document.key!
+
+                        if (document.author != entity.ccid) {
+                            return
+                        }
+
+                        if (document.schema === "https://schema.concrnt.net/reference.json") {
+                            cckv = document.value.href
+                        }
+
+                        const baseURL = new URL(config.activitypub.baseUrl)
+                        const ctx = fedi.createContext(baseURL, undefined)
+                        const noteArgs = { identifier: entity.id, id: cckv }
+                        const noteURL = ctx.getObjectUri(Note, noteArgs)
+                        const note = await ctx.lookupObject(noteURL)
+
+                        await ctx.sendActivity(
+                            { identifier: entity.id },
+                            "followers",
+                            new Create({
+                                id: new URL("#activity", note?.id ?? undefined),
+                                object: note,
+                                actors: note?.attributionIds,
+                                tos: note?.toIds,
+                                ccs: note?.ccIds,
+                            }),
+                        )
+                    } else if (msg.type === "deleted") {
+                        console.log(`Received deleted message for ${channel}`);
+
+                        const cckv = msg.uri
+                        const noteArgs = { identifier: entity.id, id: cckv }
+                        const baseURL = new URL(config.activitypub.baseUrl)
+                        const ctx = fedi.createContext(baseURL, undefined)
+                        const noteURL = ctx.getObjectUri(Note, noteArgs)
+
+                        await ctx.sendActivity(
+                            { identifier: entity.id },
+                            "followers",
+                            new Delete({
+                                id: new URL(`#delete-${Date.now()}`, noteURL),
+                                actor: ctx.getActorUri(entity.id),
+                                object: noteURL,
+                            })
+                        )
                     }
-
-                    if (document.schema === "https://schema.concrnt.net/reference.json") {
-                        cckv = document.value.href
-                    }
-
-                    const baseURL = new URL(config.activitypub.baseUrl)
-                    const ctx = fedi.createContext(baseURL, undefined)
-                    const noteArgs = { identifier: entity.id, id: cckv }
-                    const noteURL = ctx.getObjectUri(Note, noteArgs)
-                    const note = await ctx.lookupObject(noteURL)
-
-                    await ctx.sendActivity(
-                        { identifier: entity.id },
-                        "followers",
-                        new Create({
-                            id: new URL("#activity", note?.id ?? undefined),
-                            object: note,
-                            actors: note?.attributionIds,
-                            tos: note?.toIds,
-                            ccs: note?.ccIds,
-                        }),
-                    )
                 }
-
-
             })
 
             const assocPrefix = `cckv://${config.concrnt.ccid}/activitypub.concrnt.world/inbox/`
