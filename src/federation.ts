@@ -1,5 +1,5 @@
 import { createFederation, exportJwk, generateCryptoKeyPair } from "@fedify/fedify";
-import { Person, Follow, Endpoints, Accept, Undo, Note, PUBLIC_COLLECTION, type Recipient, Create, Like, getTypeId } from "@fedify/vocab";
+import { Person, Follow, Endpoints, Accept, Undo, Note, PUBLIC_COLLECTION, type Recipient, Create, Like } from "@fedify/vocab";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
 import { Redis } from "ioredis";
@@ -209,6 +209,49 @@ federation
     })
     .on(Like, async (ctx, like) => {
         console.log("Received Like activity:", like);
+
+        const actorId = like.actorId;
+        if (actorId == null) {
+            logger.warn(`Received Like activity with missing actor ID`);
+            return;
+        }
+        const actorUri = like.actorId?.toString();
+        if (actorUri == null) {
+            logger.warn(`Received Like activity with invalid actor ID: ${like.actorId}`);
+            return;
+        }
+
+        const target = ctx.parseUri(like.objectId);
+        if (target == null || target.type !== "object") {
+            logger.warn(`Received Like activity with invalid object: ${like.objectId}`);
+            return;
+        }
+
+        const apid = target.values.identifier
+        const cckv = target.values.id
+
+        const entity = await db.select().from(apEntity).where(eq(apEntity.id, apid)).limit(1).then(res => res[0]);
+        if (!entity) {
+            logger.warn(`No entity found for actor URI: ${actorUri}`);
+            return;
+        }
+        const ccid = entity.ccid
+
+        const distributes: string[] = [
+            `cckv://${ccid}/concrnt.world/profiles/main/notify-timeline`
+        ]
+
+        const document: Document<any> = {
+            author: config.concrnt.ccid,
+            schema: "https://schema.concrnt.world/a/like.json",
+            associate: cckv,
+            value: {},
+            distributes,
+            createdAt: new Date(),
+        }
+
+        await commit(document);
+
     })
 ;
 

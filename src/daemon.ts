@@ -43,9 +43,8 @@ export const startEntityBroker = async () => {
 
                 console.log(`Entity ${entity.id} has ${followers.length} followers.`)
 
-                let cckv = channel
-
                 const document = await concrntApi.getDocument<any>(channel);
+                let cckv: string = document.key!
 
                 if (document.author != entity.ccid) {
                     return
