@@ -10,9 +10,11 @@ const pool = new Pool({
   connectionString: config.database.url,
 });
 
+const migrationsFolder = process.env.MIGRATIONS_DIR ?? "./drizzle";
+
 try {
   const db = drizzle(pool, { schema });
-  await migrate(db, { migrationsFolder: "./drizzle" });
+  await migrate(db, { migrationsFolder });
   console.log("Database migrations completed.");
 } finally {
   await pool.end();
