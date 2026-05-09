@@ -1,6 +1,5 @@
 .git
 node_modules
-drizzle
 dist
 coverage
 *.log

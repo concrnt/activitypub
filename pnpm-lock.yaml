@@ -32,9 +32,6 @@ importers:
       '@logtape/logtape':
         specifier: ^2.0.0
         version: 2.0.2
-      drizzle-kit:
-        specifier: ^0.31.9
-        version: 0.31.9
       drizzle-orm:
         specifier: ^0.45.1
         version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(pg@8.18.0)
@@ -66,6 +63,9 @@ importers:
       '@types/pg':
         specifier: ^8.16.0
         version: 8.16.0
+      drizzle-kit:
+        specifier: ^0.31.9
+        version: 0.31.9
       eslint:
         specifier: ^9.0.0
         version: 9.39.3

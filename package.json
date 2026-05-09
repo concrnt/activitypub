@@ -16,7 +16,6 @@
     "@js-temporal/polyfill": "^0.5.1",
     "@logtape/logtape": "^2.0.0",
     "drizzle-orm": "^0.45.1",
-    "drizzle-kit": "^0.31.9",
     "hono": "^4.5.0",
     "ioredis": "^5.4.1",
     "pg": "^8.18.0",
@@ -28,6 +27,7 @@
     "@biomejs/biome": "^2.2.4",
     "@fedify/lint": "2.0.0",
     "@types/pg": "^8.16.0",
+    "drizzle-kit": "^0.31.9",
     "eslint": "^9.0.0"
   }
 }
