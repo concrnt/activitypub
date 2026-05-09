@@ -3,6 +3,7 @@
   "scripts": {
     "dev": "tsx watch ./src/index.ts",
     "prod": "node --import tsx ./src/index.ts",
+    "migrate": "node --import tsx ./src/migrate.ts",
     "lint": "eslint ."
   },
   "dependencies": {

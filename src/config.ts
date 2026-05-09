@@ -24,7 +24,8 @@ export interface AppConfig {
 
 type ConfigRecord = Record<string, unknown>;
 
-const configPath = fileURLToPath(new URL("../config.yaml", import.meta.url));
+const defaultConfigPath = fileURLToPath(new URL("../config.yaml", import.meta.url));
+const configPath = process.env.CONFIG_PATH ?? defaultConfigPath;
 
 const isRecord = (value: unknown): value is ConfigRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
