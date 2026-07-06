@@ -8,6 +8,13 @@
       "when": 1777723095875,
       "tag": "0000_flashy_mongu",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783318502073,
+      "tag": "0001_melted_weapon_omega",
+      "breakpoints": true
     }
   ]
 }

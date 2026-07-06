@@ -1,22 +1,25 @@
-// @ts-nocheck this file is just a template
-import { Hono } from "hono";
+import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { federation } from "@fedify/hono";
 import { getLogger } from "@logtape/logtape";
 import fedi from "./federation.ts";
-import { Person, Note, isActor, Follow, Undo } from "@fedify/vocab";
-import { db, apEntity } from "./db"
+import { isActor, Follow, Undo } from "@fedify/vocab";
+import { db, apEntity } from "./db/index.ts"
 import { eq, and } from "drizzle-orm";
 import { apFollow } from "./db/schema.ts";
 import { config } from "./config.ts";
 
 const logger = getLogger("activitypub");
 
+// ゲートウェイから伝搬される認証情報
+interface AuthInfo {
+    ccid: string
+}
 
-const receiveAuthInfo = (c: any) => {
+const receiveAuthInfo = (c: HonoContext): AuthInfo | null => {
     const authInfoStr = c.req.header("cc-requester")
-    const authInfo = authInfoStr ? JSON.parse(authInfoStr) : null;
-    logger.info("Received request with auth info:", authInfo);
+    const authInfo = authInfoStr ? JSON.parse(authInfoStr) as AuthInfo : null;
+    logger.debug(`Received request with auth info: ${authInfoStr}`);
     return authInfo;
 }
 
@@ -70,7 +73,7 @@ app.post("/ap/api/setup", async (c) => {
 
     const ccid = authInfo.ccid
 
-    console.log("Setting up ActivityPub entity for id:", ccid);
+    logger.info(`Setting up ActivityPub entity for ccid: ${ccid}`);
 
     await db.insert(apEntity).values({
         id: id.toLowerCase(),
@@ -197,7 +200,7 @@ app.post("/ap/api/follow", async (c) => {
 
     const ctx = fedi.createContext(c.req.raw, undefined);
     const actor = await ctx.lookupObject(target);
-    if (!isActor(actor)) {
+    if (actor == null || !isActor(actor) || actor.id == null) {
         return c.json({ error: "Target URI does not resolve to an actor" }, 400);
     }
 
@@ -242,7 +245,7 @@ app.post("/ap/api/unfollow", async (c) => {
 
     const ctx = fedi.createContext(c.req.raw, undefined);
     const actor = await ctx.lookupObject(target);
-    if (!isActor(actor)) {
+    if (actor == null || !isActor(actor) || actor.id == null) {
         return c.json({ error: "Target URI does not resolve to an actor" }, 400);
     }
 
@@ -284,9 +287,9 @@ app.get("/ap/api/resolve", async (c) => {
 
     return await ctx.lookupObject(uri, {crossOrigin: 'trust'}).then(async (obj) => {
         if (obj) {
-            return c.json(await obj.toJsonLd());
+            return c.json(await obj.toJsonLd() as object);
         } else {
-            console.log("Object not found for URI:", uri);
+            logger.info(`Object not found for URI: ${uri}`);
             return c.json({ error: "Object not found" }, 404);
         }
     })
