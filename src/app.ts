@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { federation } from "@fedify/hono";
@@ -35,6 +37,30 @@ app.use(cors({
 interface ApServerInfo {
     serviceAccountId: string
 }
+
+const pkg = JSON.parse(
+    readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")
+) as { name: string; version: string };
+
+// 本体は path.Join(service.Path, endpoint) で広告値を組み立てるため、
+// services 設定では path を指定せず paths: [/ap, ...] + preservePath で登録すること
+// (Fediverse向けURLが /ap 固定なので、このサービスはマウント位置を変えられない)。
+const ccEndpoints: Record<string, string> = {
+    "net.concrnt.activitypub.info":      "/ap/api/info",
+    "net.concrnt.activitypub.setup":     "/ap/api/setup",      // POST {id}
+    "net.concrnt.activitypub.settings":  "/ap/api/settings",   // GET=取得 / POST=更新
+    "net.concrnt.activitypub.stats":     "/ap/api/stats",
+    "net.concrnt.activitypub.followers": "/ap/api/followers",
+    "net.concrnt.activitypub.following": "/ap/api/following",
+    "net.concrnt.activitypub.follow":    "/ap/api/follow",     // POST {target}
+    "net.concrnt.activitypub.unfollow":  "/ap/api/unfollow",   // POST {target}
+    "net.concrnt.activitypub.resolve":   "/ap/api/resolve?uri={uri}",
+};
+
+// concrnt本体が services 登録済みサービスへ直接ポーリングするサービス広告
+app.get("/cc-info", (c) =>
+    c.json({ name: pkg.name, version: pkg.version, endpoints: ccEndpoints })
+);
 
 app.get("/ap", (c) => c.text("Hello, Fedify!"));
 
@@ -138,6 +164,31 @@ app.post("/ap/api/settings", async (c) => {
     return c.json({ message: "Settings updated successfully" });
 });
 
+
+app.get("/ap/api/stats", async (c) => {
+
+    const authInfo = receiveAuthInfo(c)
+    if (!authInfo) {
+        return c.json({ error: "Missing authentication information" }, 400);
+    }
+
+    const id = authInfo.ccid
+
+    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, id)).limit(1).then(res => res[0]);
+    if (!entity) {
+        return c.json({ error: "No ActivityPub entity found for this user" }, 404);
+    }
+
+    const follows = await db.select().from(apFollow)
+        .where(eq(apFollow.subscriberId, entity.id))
+        .then(follows => follows.map(f => f.publisherId));
+
+    const followers = await db.select().from(apFollow)
+        .where(eq(apFollow.publisherId, entity.id))
+        .then(followers => followers.map(f => f.subscriberId));
+
+    return c.json({ follows, followers });
+});
 
 app.get("/ap/api/followers", async (c) => {
 

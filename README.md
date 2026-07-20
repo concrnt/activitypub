@@ -12,7 +12,7 @@ Fediverse ⇄ [Fedify federation (src/federation.ts)] ⇄ concrnt core
 
 - **src/federation.ts** — Fedify の inbox リスナー(Follow / Undo / Accept / Reject / Create / Announce / Like / EmojiReact / Update / Delete)、アクター・鍵・followers・outbox・Note の各ディスパッチャ。
 - **src/daemon.ts** — Redis pub/sub で concrnt のイベントを購読し、投稿→Create、boost→Announce、Like/リアクション→Like、削除→Delete/Undo、プロフィール更新→Update(Person) を配信。
-- **src/app.ts** — concrnt クライアント向けの REST API (`/ap/api/*`): setup / settings / followers / following / follow / unfollow / resolve。
+- **src/app.ts** — concrnt クライアント向けの REST API (`/ap/api/*`): setup / settings / stats / followers / following / follow / unfollow / resolve。`/cc-info` で各エンドポイントを `net.concrnt.activitypub.*` シグネチャとして concrnt 本体へ広告。
 - **src/convert.ts, src/render.ts, src/schemas.ts** — concrnt ドキュメント ⇄ AP オブジェクトの変換ロジック。render/schemas は純粋関数でユニットテスト対象。
 - **src/db/** — Drizzle ORM (Postgres)。
 
@@ -45,7 +45,26 @@ pnpm dev        # 開発 (tsx watch)
 pnpm prod       # 本番
 ```
 
-必要なもの: Postgres、Redis(concrnt コアと同じインスタンス)、concrnt コア。リバースプロキシで `/ap/*` と `/.well-known/*` をこのサーバーへ向けてください。
+必要なもの: Postgres、Redis(concrnt コアと同じインスタンス)、concrnt コア。
+
+concrnt 本体のゲートウェイにサービスとして登録します (本体 config.yaml の `services:`):
+
+```yaml
+services:
+  - name: net.concrnt.activitypub
+    host: activitypub
+    port: 8008
+    paths:
+      - /ap
+      - /.well-known/webfinger
+      - /.well-known/nodeinfo
+      - /.well-known/host-meta
+    preservePath: true
+```
+
+登録すると本体が `http://<host>:<port>/cc-info` を直接ポーリングし、広告された `net.concrnt.activitypub.*` エンドポイントを `/.well-known/concrnt` の `endpoints` に統合します。クライアント(world-app 等)はこのシグネチャ経由でエンドポイントを解決します。
+
+注意: `path` は指定せず `paths` で登録してください。本体は広告されたエンドポイントに `path` を前置するため、`path: /ap` を指定すると `/ap/ap/api/...` に壊れます (このサービスは Fediverse 向けURLが `/ap` 固定のためマウント位置を変えられず、`/cc-info` は絶対パスで広告しています)。
 
 ## 開発
 
