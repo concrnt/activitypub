@@ -6,7 +6,6 @@
     "dev": "tsx watch ./src/index.ts",
     "prod": "node --import tsx ./src/index.ts",
     "migrate": "node --import tsx ./src/migrate.ts",
-    "migrate:follows": "node --import tsx ./src/scripts/migrate-follows.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
