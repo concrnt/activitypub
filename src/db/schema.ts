@@ -10,25 +10,6 @@ export const apEntity = pgTable("ap_entities", {
 
 export type ApEntity = typeof apEntity.$inferSelect;
 
-export const apFollow = pgTable(
-    "ap_follows", 
-    {
-        accepted: boolean("accepted").notNull().default(false),
-        publisherId: text("publisher_id").notNull(),
-
-        subscriberId: text("subscriber_id").notNull(),
-        subscriberInbox: text("subscriber_inbox"),
-        subscriberSharedInbox: text("subscriber_shared_inbox"),
-    },
-    (table) => [
-        primaryKey({
-            columns: [table.publisherId, table.subscriberId]
-        })
-    ]
-);
-
-export type ApFollow = typeof apFollow.$inferSelect;
-
 export const apKeys = pgTable(
     "ap_keys", 
     {

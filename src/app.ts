@@ -5,11 +5,10 @@ import { cors } from "hono/cors";
 import { federation } from "@fedify/hono";
 import { getLogger } from "@logtape/logtape";
 import fedi from "./federation.ts";
-import { isActor, Follow, Undo } from "@fedify/vocab";
 import { db, apEntity } from "./db/index.ts"
-import { eq, and } from "drizzle-orm";
-import { apFollow } from "./db/schema.ts";
+import { eq } from "drizzle-orm";
 import { config } from "./config.ts";
+import * as followStore from "./followStore.ts";
 
 const logger = getLogger("activitypub");
 
@@ -52,8 +51,6 @@ const ccEndpoints: Record<string, string> = {
     "net.concrnt.activitypub.stats":     "/ap/api/stats",
     "net.concrnt.activitypub.followers": "/ap/api/followers",
     "net.concrnt.activitypub.following": "/ap/api/following",
-    "net.concrnt.activitypub.follow":    "/ap/api/follow",     // POST {target}
-    "net.concrnt.activitypub.unfollow":  "/ap/api/unfollow",   // POST {target}
     "net.concrnt.activitypub.resolve":   "/ap/api/resolve?uri={uri}",
 };
 
@@ -179,13 +176,12 @@ app.get("/ap/api/stats", async (c) => {
         return c.json({ error: "No ActivityPub entity found for this user" }, 404);
     }
 
-    const follows = await db.select().from(apFollow)
-        .where(eq(apFollow.subscriberId, entity.id))
-        .then(follows => follows.map(f => f.publisherId));
+    const follows = followStore.getFollowing(entity.ccid)
+        .filter(f => f.status !== 'rejected')
+        .map(f => f.actorURI);
 
-    const followers = await db.select().from(apFollow)
-        .where(eq(apFollow.publisherId, entity.id))
-        .then(followers => followers.map(f => f.subscriberId));
+    const followers = followStore.getFollowers(entity.ccid)
+        .map(f => f.actorURI);
 
     return c.json({ follows, followers });
 });
@@ -204,9 +200,8 @@ app.get("/ap/api/followers", async (c) => {
         return c.json({ error: "No ActivityPub entity found for this user" }, 404);
     }
 
-    const followers = await db.select().from(apFollow)
-        .where(eq(apFollow.publisherId, entity.id))
-        .then(followers => followers.map(f => f.subscriberId));
+    const followers = followStore.getFollowers(entity.ccid)
+        .map(f => f.actorURI);
 
     return c.json(followers);
 });
@@ -225,105 +220,13 @@ app.get("/ap/api/following", async (c) => {
         return c.json({ error: "No ActivityPub entity found for this user" }, 404);
     }
 
-    const following = await db.select().from(apFollow)
-        .where(eq(apFollow.subscriberId, entity.id))
-        .then(following => following.map(f => f.publisherId));
+    // フォローはユーザー署名のcckvレコード(follows/)がsource of truth。
+    // フォロー・アンフォロー操作はクライアントがレコードをcommit/deleteすることで行う。
+    const following = followStore.getFollowing(entity.ccid)
+        .filter(f => f.status !== 'rejected')
+        .map(f => f.actorURI);
 
     return c.json(following);
-});
-
-
-app.post("/ap/api/follow", async (c) => {
-
-    const authInfo = receiveAuthInfo(c)
-    if (!authInfo) {
-        return c.json({ error: "Missing authentication information" }, 400);
-    }
-
-    const id = authInfo.ccid
-
-    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, id)).limit(1).then(res => res[0]);
-    if (!entity) {
-        return c.json({ error: "No ActivityPub entity found for this user" }, 404);
-    }
-
-    const { target } = await c.req.json();
-
-    const ctx = fedi.createContext(c.req.raw, undefined);
-    const actor = await ctx.lookupObject(target);
-    if (actor == null || !isActor(actor) || actor.id == null) {
-        return c.json({ error: "Target URI does not resolve to an actor" }, 400);
-    }
-
-    await ctx.sendActivity(
-        { identifier: entity.id },
-        actor,
-        new Follow({
-            actor: ctx.getActorUri(entity.id),
-            object: actor.id,
-            to: actor.id,
-        }),
-        { excludeBaseUris: [new URL(ctx.origin)] }
-    )
-
-    await db
-        .insert(apFollow)
-        .values({
-            accepted: false,
-            publisherId: actor.id.toString(),
-            subscriberId: entity.id,
-        })
-        .onConflictDoNothing();
-
-    return c.json({ message: "Follow request sent to " + target });
-});
-
-app.post("/ap/api/unfollow", async (c) => {
-
-    const authInfo = receiveAuthInfo(c)
-    if (!authInfo) {
-        return c.json({ error: "Missing authentication information" }, 400);
-    }
-
-    const id = authInfo.ccid
-
-    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, id)).limit(1).then(res => res[0]);
-    if (!entity) {
-        return c.json({ error: "No ActivityPub entity found for this user" }, 404);
-    }
-
-    const { target } = await c.req.json();
-
-    const ctx = fedi.createContext(c.req.raw, undefined);
-    const actor = await ctx.lookupObject(target);
-    if (actor == null || !isActor(actor) || actor.id == null) {
-        return c.json({ error: "Target URI does not resolve to an actor" }, 400);
-    }
-
-    await ctx.sendActivity(
-        { identifier: entity.id },
-        actor,
-        new Undo({
-            actor: ctx.getActorUri(entity.id),
-            object: new Follow({
-                actor: ctx.getActorUri(entity.id),
-                object: actor.id,
-                to: actor.id,
-            }),
-        }),
-        { excludeBaseUris: [new URL(ctx.origin)] }
-    )
-
-    await db
-        .delete(apFollow)
-        .where(
-            and(
-                eq(apFollow.publisherId, actor.id.toString()),
-                eq(apFollow.subscriberId, entity.id)
-            )
-        );
-
-    return c.json({ message: "Unfollow request sent to " + target });
 });
 
 

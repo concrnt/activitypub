@@ -1,14 +1,16 @@
-import { db, apEntity, apFollow, apObjectReference, type ApEntity } from './db/index.ts';
+import { db, apEntity, apObjectReference, type ApEntity } from './db/index.ts';
 import { Redis } from "ioredis";
 import { and, eq } from "drizzle-orm";
 import fedi, { buildPerson } from "./federation.ts";
-import { Announce, Create, Delete, Emoji, Image, isActor, Like, Note, PUBLIC_COLLECTION, Tombstone, Undo, Update } from '@fedify/vocab';
+import { Announce, Create, Delete, Emoji, Follow, Image, isActor, Like, Note, PUBLIC_COLLECTION, Tombstone, Undo, Update } from '@fedify/vocab';
 
 import { getLogger } from "@logtape/logtape";
 
-import concrntApi from "./concrnt.ts";
+import concrntApi, { commit, type CommitDocument } from "./concrnt.ts";
 import { config } from "./config.ts";
-import { buildNote, isPlainReroute, resolveApObjectUrl, SCHEMA_AP_NOTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION } from "./convert.ts";
+import { buildNote, isPlainReroute, resolveApObjectUrl, SCHEMA_AP_NOTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_DELETE } from "./convert.ts";
+import { SCHEMA_AP_FOLLOW, SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, acceptStateKey, type ApFollowerValue, type ApAcceptStateValue } from "./schemas.ts";
+import * as followStore from "./followStore.ts";
 
 interface CoreSignedDocument {
     document: string;
@@ -34,6 +36,19 @@ const outboundLikeCcfs = new Set<string>();
 
 const updateEntities = async () => {
     entities = await db.select().from(apEntity);
+}
+
+// 60秒周期: entityリロード後、新規entityのフォローと未ロードのサービスレコードを取り込む
+const refreshEntities = async () => {
+    await updateEntities();
+    await followStore.ensureServiceRecordsLoaded().catch((error) => {
+        logger.error(`Failed to load service follow records: ${error}`);
+    });
+    for (const entity of entities) {
+        await followStore.ensureEntityFollowsLoaded(entity.ccid).catch((error) => {
+            logger.error(`Failed to load follows for ${entity.ccid}: ${error}`);
+        });
+    }
 }
 
 const loadOutboundLikes = async () => {
@@ -376,13 +391,173 @@ const handleAssociationDeleted = async (msg: CoreEvent) => {
     outboundLikeCcfs.delete(msg.uri);
 }
 
+// Follow/Undo(Follow)を突合できるよう、followレコードのキーから決定的にアクティビティidを導出する
+const followActivityId = (recordKey: string) =>
+    new URL(`${config.activitypub.baseUrl}/ap/follows/${encodeURIComponent(recordKey)}`);
+
+const deleteServiceRecord = async (key: string) => {
+    const document: CommitDocument<string> = {
+        kind: 'delete',
+        schema: SCHEMA_DELETE,
+        value: key,
+        author: config.concrnt.ccid,
+        createdAt: new Date(),
+    };
+    await commit(document);
+}
+
+// ユーザー署名のfollowレコード(source of truth)のイベントを処理する。
+// created → Followアクティビティ送信 / deleted → Undo(Follow)送信。
+const handleFollowRecordEvent = async (entity: ApEntity, channel: string, msg: CoreEvent) => {
+
+    const ctx = fedi.createContext(new URL(config.activitypub.baseUrl), undefined);
+
+    if (msg.type === "created") {
+
+        if (!entity.enabled) return;
+
+        const eventSD = msg.documents?.[channel];
+        const document: any = eventSD
+            ? JSON.parse(eventSD.document)
+            : await concrntApi.getDocument<any>(channel).catch(() => null);
+        if (document == null) {
+            logger.error(`Failed to resolve follow document: ${channel}`);
+            return;
+        }
+        if (document.author !== entity.ccid || document.schema !== SCHEMA_AP_FOLLOW) return;
+
+        const actorURI: string | undefined = document.value?.actorURI;
+        if (!actorURI) {
+            logger.warn(`Follow record without actorURI: ${channel}`);
+            return;
+        }
+
+        // kv上書きの再createdで既に処理済みならスキップ。
+        // rejected状態ならリトライとみなし、状態を消してFollowを再送する。
+        if (followStore.getByKey(channel)) {
+            if (followStore.getAcceptState(entity.ccid, actorURI) !== 'rejected') return;
+            const stateKey = acceptStateKey(config.concrnt.ccid, entity.ccid, actorURI);
+            await deleteServiceRecord(stateKey).catch((error) => {
+                logger.warn(`Failed to delete accept-state record ${stateKey}: ${error}`);
+            });
+            followStore.removeAcceptStateByKey(stateKey);
+        }
+
+        // 送信前に登録し、送信に失敗したら取り消す(再createdで再試行可能にする)
+        followStore.setFollowing({ ccid: entity.ccid, key: channel, actorURI });
+
+        try {
+            const actor = await ctx.lookupObject(actorURI);
+            if (actor == null || !isActor(actor) || actor.id == null) {
+                logger.warn(`Follow target does not resolve to an actor: ${actorURI}`);
+                followStore.removeFollowingByKey(channel);
+                return;
+            }
+            if (actor.id.href !== actorURI) {
+                // クライアントは正規のアクターidを書く契約。ずれていても
+                // Accept/Undoとの突合一貫性を優先してレコード値のURIを使い続ける。
+                logger.warn(`Follow record actorURI is not canonical: ${actorURI} (canonical: ${actor.id.href})`);
+            }
+
+            await ctx.sendActivity(
+                { identifier: entity.id },
+                actor,
+                new Follow({
+                    id: followActivityId(channel),
+                    actor: ctx.getActorUri(entity.id),
+                    object: new URL(actorURI),
+                    to: new URL(actorURI),
+                }),
+                { excludeBaseUris: [new URL(config.activitypub.baseUrl)] },
+            );
+            logger.info(`Sent Follow to ${actorURI} for ${entity.id}`);
+        } catch (error) {
+            followStore.removeFollowingByKey(channel);
+            throw error;
+        }
+
+    } else if (msg.type === "deleted") {
+
+        // deletedイベントは値を持たないため、メモリ上のキー逆引きで対象を特定する
+        const ref = followStore.getByKey(msg.uri);
+        if (!ref || ref.kind !== 'follow' || ref.ccid !== entity.ccid) return;
+        const actorURI = ref.actorURI;
+
+        const actor = await ctx.lookupObject(actorURI).catch(() => null);
+        if (actor != null && isActor(actor)) {
+            await ctx.sendActivity(
+                { identifier: entity.id },
+                actor,
+                new Undo({
+                    id: new URL("#undo", followActivityId(msg.uri)),
+                    actor: ctx.getActorUri(entity.id),
+                    object: new Follow({
+                        id: followActivityId(msg.uri),
+                        actor: ctx.getActorUri(entity.id),
+                        object: new URL(actorURI),
+                        to: new URL(actorURI),
+                    }),
+                }),
+                { excludeBaseUris: [new URL(config.activitypub.baseUrl)] },
+            );
+            logger.info(`Sent Undo(Follow) to ${actorURI} for ${entity.id}`);
+        } else {
+            logger.warn(`Failed to resolve actor for Undo(Follow), removing locally: ${actorURI}`);
+        }
+
+        const stateKey = acceptStateKey(config.concrnt.ccid, entity.ccid, actorURI);
+        if (followStore.getByKey(stateKey)) {
+            await deleteServiceRecord(stateKey).catch((error) => {
+                logger.warn(`Failed to delete accept-state record ${stateKey}: ${error}`);
+            });
+            followStore.removeAcceptStateByKey(stateKey);
+        }
+        followStore.removeFollowingByKey(msg.uri);
+    }
+}
+
+// サービスアカウント自身が書いたfollower/accept-stateレコードのイベントをストアへ反映する。
+// 書き込み箇所(federation.ts)では commit と同時にストアも更新しているため、
+// ここでの適用は自己エコーの冪等な再適用(+移行スクリプト等の別経路書き込みの取り込み)。
+const handleServiceRecordEvent = async (channel: string, msg: CoreEvent) => {
+
+    const followerPrefix = `cckv://${config.concrnt.ccid}/${AP_NAMESPACE}/followers/`;
+    const acceptStatePrefix = `cckv://${config.concrnt.ccid}/${AP_NAMESPACE}/accept-states/`;
+
+    if (msg.type === "created") {
+
+        const eventSD = msg.documents?.[channel];
+        const document: any = eventSD
+            ? JSON.parse(eventSD.document)
+            : await concrntApi.getDocument<any>(channel).catch(() => null);
+        if (document == null || document.author !== config.concrnt.ccid) return;
+
+        if (channel.startsWith(followerPrefix) && document.schema === SCHEMA_AP_FOLLOWER) {
+            const value = document.value as ApFollowerValue;
+            if (!value?.ccid || !value?.actorURI || !value?.inbox) return;
+            followStore.setFollower({ ccid: value.ccid, key: channel, actorURI: value.actorURI, inbox: value.inbox, sharedInbox: value.sharedInbox });
+        } else if (channel.startsWith(acceptStatePrefix) && document.schema === SCHEMA_AP_ACCEPT_STATE) {
+            const value = document.value as ApAcceptStateValue;
+            if (!value?.ccid || !value?.actorURI || !value?.status) return;
+            followStore.setAcceptState(channel, value.ccid, value.actorURI, value.status);
+        }
+
+    } else if (msg.type === "deleted") {
+        if (msg.uri.startsWith(followerPrefix)) {
+            followStore.removeFollowerByKey(msg.uri);
+        } else if (msg.uri.startsWith(acceptStatePrefix)) {
+            followStore.removeAcceptStateByKey(msg.uri);
+        }
+    }
+}
+
 export const startEntityBroker = async () => {
 
     const redis = new Redis(config.redis.url);
 
     await updateEntities(); // Initial load of entities
     await loadOutboundLikes(); // 送信済みLikeのフィルタを初期化
-    setInterval(updateEntities, 60000); // Update entities every 60 seconds
+    setInterval(refreshEntities, 60000); // Update entities every 60 seconds
 
     redis.psubscribe("*", (err, count) => {
         if (err) {
@@ -420,6 +595,18 @@ export const startEntityBroker = async () => {
                 if (channel === profileKey && msg.type === "created") {
                     await handleProfileUpdate(entity);
                 }
+
+                // ユーザーが書いたfollowレコード → Follow/Undo(Follow)送信
+                const followPrefix = `cckv://${entity.ccid}/${AP_NAMESPACE}/follows/`;
+                if (channel.startsWith(followPrefix)) {
+                    await handleFollowRecordEvent(entity, channel, msg);
+                }
+            }
+
+            // サービスアカウント自身のfollower/accept-stateレコードをストアへ反映
+            const serviceNsPrefix = `cckv://${config.concrnt.ccid}/${AP_NAMESPACE}/`;
+            if (channel.startsWith(serviceNsPrefix)) {
+                await handleServiceRecordEvent(channel, msg);
             }
 
             const assocPrefix = `cckv://${config.concrnt.ccid}/activitypub.concrnt.world/inbox/`
@@ -435,5 +622,10 @@ export const startEntityBroker = async () => {
             logger.error(`Error processing Redis message: ${error}`);
         }
 
+    });
+
+    // 購読開始後に初期ロードする(ロード中に届いたイベントは冪等な適用で収束する)
+    await followStore.initialize(entities.map(e => e.ccid)).catch((error) => {
+        logger.error(`followStore initialization failed (will retry on refresh): ${error}`);
     });
 }

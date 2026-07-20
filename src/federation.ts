@@ -4,18 +4,16 @@ import type { Context } from "@fedify/fedify";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
 import { Redis } from "ioredis";
-import { db, apEntity, apFollow, apKeys, apObjectReference } from './db/index.ts';
+import { db, apEntity, apKeys, apObjectReference } from './db/index.ts';
 import { importJwk } from "@fedify/fedify";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { CDID } from '@concrnt/client'
 
-import concrntApi, { type CommitDocument } from "./concrnt.ts";
+import concrntApi, { commit, type CommitDocument } from "./concrnt.ts";
 import { config } from "./config.ts";
 import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote } from "./convert.ts";
-
-const commit = async (document: CommitDocument<any>) => {
-    return await concrntApi.commit(document, concrntApi.defaultHost, { useMasterkey: true })
-}
+import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, followerKey, acceptStateKey, type ApFollowerValue } from "./schemas.ts";
+import * as followStore from "./followStore.ts";
 
 const logger = getLogger("activitypub");
 
@@ -25,14 +23,8 @@ const inboxKey = (url: string) =>
 
 // リモートアクターをフォローしているローカルエンティティのinboxタイムライン一覧
 const getFollowerDistribution = async (actorUri: string): Promise<string[]> => {
-    const followers = await db.select().from(apFollow)
-        .where(eq(apFollow.publisherId, actorUri));
-    if (followers.length === 0) return [];
-
-    const entities = await db.select().from(apEntity)
-        .where(inArray(apEntity.id, followers.map(f => f.subscriberId)));
-
-    return entities.map(e => `cckv://${e.ccid}/activitypub.concrnt.world/inbox`);
+    return followStore.getLocalFollowerCcids(actorUri)
+        .map(ccid => `cckv://${ccid}/activitypub.concrnt.world/inbox`);
 };
 
 // リモートnoteを参照ドキュメント(ap/note.json)としてconcrntに保存し、保存先キーを返す
@@ -240,21 +232,26 @@ federation
             return;
         }
 
-        await db.insert(apFollow).values({
-            accepted: true,
-            publisherId: object.identifier,
-            subscriberId: subscriberId,
-            subscriberInbox: follower.inboxId.toString(),
-            subscriberSharedInbox: follower.endpoints?.sharedInbox?.toString(),
-        })
-        .onConflictDoUpdate({
-            target: [apFollow.publisherId, apFollow.subscriberId],
-            set: {
-                accepted: true,
-                subscriberInbox: follower.inboxId.toString(),
-                subscriberSharedInbox: follower.endpoints?.sharedInbox?.toString(),
-            },
-        })
+        // フォロワーをサービスアカウントのレコードとして記録する。
+        // 同一キーへの再commitはupdateになるため、再Follow時のinbox更新もこれで効く。
+        const key = followerKey(config.concrnt.ccid, targetEntity.ccid, subscriberId);
+        const value: ApFollowerValue = {
+            ccid: targetEntity.ccid,
+            actorURI: subscriberId,
+            inbox: follower.inboxId.toString(),
+        };
+        const sharedInbox = follower.endpoints?.sharedInbox?.toString();
+        if (sharedInbox) value.sharedInbox = sharedInbox;
+
+        await commit({
+            kind: 'record',
+            key,
+            schema: SCHEMA_AP_FOLLOWER,
+            value,
+            author: config.concrnt.ccid,
+            createdAt: new Date(),
+        });
+        followStore.setFollower({ ccid: targetEntity.ccid, key, actorURI: subscriberId, inbox: value.inbox, sharedInbox });
 
         const accept = new Accept({
             actor: follow.objectId,
@@ -279,14 +276,18 @@ federation
                 return;
             }
 
-            await db
-                .delete(apFollow)
-                .where(
-                    and(
-                        eq(apFollow.publisherId, parsed.identifier),
-                        eq(apFollow.subscriberId, undo.actorId.toString())
-                    )
-                );
+            const key = followerKey(config.concrnt.ccid, targetEntity.ccid, undo.actorId.toString());
+            await commit({
+                kind: 'delete',
+                schema: SCHEMA_DELETE,
+                value: key,
+                author: config.concrnt.ccid,
+                createdAt: new Date(),
+            }).catch((error) => {
+                // レコードが元々存在しない場合も先へ進む(冪等)
+                logger.warn(`Failed to delete follower record ${key}: ${error}`);
+            });
+            followStore.removeFollowerByKey(key);
 
         } else if (object instanceof Announce) {
             if (object.id == null || undo.actorId == null) return;
@@ -352,19 +353,24 @@ federation
         const followTarget = follow.objectId
         if (followTarget == null) return
 
-        await db
-            .insert(apFollow)
-            .values({
-                accepted: true,
-                publisherId: followTarget.toString(),
-                subscriberId: followerIdentifier,
-            })
-            .onConflictDoUpdate({
-                target: [apFollow.publisherId, apFollow.subscriberId],
-                set: {
-                    accepted: true,
-                },
-            });
+        const entity = await db.select().from(apEntity)
+            .where(eq(apEntity.id, followerIdentifier)).limit(1).then(res => res[0]);
+        if (!entity) {
+            logger.warn(`Received Accept(Follow) for unknown entity: ${followerIdentifier}`);
+            return;
+        }
+
+        const actorURI = followTarget.toString();
+        const key = acceptStateKey(config.concrnt.ccid, entity.ccid, actorURI);
+        await commit({
+            kind: 'record',
+            key,
+            schema: SCHEMA_AP_ACCEPT_STATE,
+            value: { ccid: entity.ccid, actorURI, status: 'accepted' },
+            author: config.concrnt.ccid,
+            createdAt: new Date(),
+        });
+        followStore.setAcceptState(key, entity.ccid, actorURI, 'accepted');
     })
     .on(Create, async (ctx, create) => {
         const actorUri = create.actorId?.toString();
@@ -443,7 +449,9 @@ federation
         await commit(document);
     })
     .on(Reject, async (ctx, reject) => {
-        // こちらから送ったFollowがリモートに拒否された場合、フォロー行を削除する
+        // こちらから送ったFollowがリモートに拒否された場合。
+        // ユーザー署名のfollowレコードはブリッジには削除できないため、
+        // accept-stateにrejectedを永続化して配送・一覧から除外する。
         const follow = await reject.getObject({ crossOrigin: 'trust' });
         if (!(follow instanceof Follow)) return;
 
@@ -456,14 +464,24 @@ federation
         const followTarget = follow.objectId;
         if (followTarget == null) return;
 
-        await db
-            .delete(apFollow)
-            .where(
-                and(
-                    eq(apFollow.publisherId, followTarget.toString()),
-                    eq(apFollow.subscriberId, followerIdentifier)
-                )
-            );
+        const entity = await db.select().from(apEntity)
+            .where(eq(apEntity.id, followerIdentifier)).limit(1).then(res => res[0]);
+        if (!entity) {
+            logger.warn(`Received Reject(Follow) for unknown entity: ${followerIdentifier}`);
+            return;
+        }
+
+        const actorURI = followTarget.toString();
+        const key = acceptStateKey(config.concrnt.ccid, entity.ccid, actorURI);
+        await commit({
+            kind: 'record',
+            key,
+            schema: SCHEMA_AP_ACCEPT_STATE,
+            value: { ccid: entity.ccid, actorURI, status: 'rejected' },
+            author: config.concrnt.ccid,
+            createdAt: new Date(),
+        });
+        followStore.setAcceptState(key, entity.ccid, actorURI, 'rejected');
     })
     .on(Update, async (ctx, update) => {
         // v2はリモートコンテンツをクライアント側でライブ解決するため、
@@ -586,27 +604,26 @@ federation.setOutboxDispatcher(
 federation.setFollowersDispatcher(
     "/ap/users/{identifier}/followers",
     async (ctx, identifier) => {
-        const followers = await db.select().from(apFollow)
-            .where(eq(apFollow.publisherId, identifier));
+        const entity = await db.select().from(apEntity)
+            .where(eq(apEntity.id, identifier)).limit(1).then(res => res[0]);
+        if (!entity) return null;
 
-        const items: Recipient[] = followers.map(f => {
-            if (!f.subscriberInbox) return null
-            return {
-                id: new URL(f.subscriberId),
-                inboxId: new URL(f.subscriberInbox),
-                endpoints:
-                    f.subscriberSharedInbox
-                    ? { sharedInbox: new URL(f.subscriberSharedInbox) }
-                    : undefined,
-            }
-        }).filter(f => f !== null);
+        const items: Recipient[] = followStore.getFollowers(entity.ccid).map(f => ({
+            id: new URL(f.actorURI),
+            inboxId: new URL(f.inbox),
+            endpoints:
+                f.sharedInbox
+                ? { sharedInbox: new URL(f.sharedInbox) }
+                : undefined,
+        }));
 
         return { items }
     },
-).setCounter((ctx, identifier) => {
-    return db.select().from(apFollow)
-        .where(eq(apFollow.publisherId, identifier))
-        .then(followers => followers.length)
+).setCounter(async (ctx, identifier) => {
+    const entity = await db.select().from(apEntity)
+        .where(eq(apEntity.id, identifier)).limit(1).then(res => res[0]);
+    if (!entity) return 0;
+    return followStore.getFollowers(entity.ccid).length;
 });
 
 
