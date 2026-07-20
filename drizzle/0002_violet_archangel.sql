@@ -1,1 +1,0 @@
-DROP TABLE "ap_follows" CASCADE;

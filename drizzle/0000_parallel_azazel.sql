@@ -7,15 +7,6 @@ CREATE TABLE "ap_entities" (
 	CONSTRAINT "ap_entities_ccid_unique" UNIQUE("ccid")
 );
 --> statement-breakpoint
-CREATE TABLE "ap_follows" (
-	"accepted" boolean DEFAULT false NOT NULL,
-	"publisher_id" text NOT NULL,
-	"subscriber_id" text NOT NULL,
-	"subscriber_inbox" text,
-	"subscriber_shared_inbox" text,
-	CONSTRAINT "ap_follows_publisher_id_subscriber_id_pk" PRIMARY KEY("publisher_id","subscriber_id")
-);
---> statement-breakpoint
 CREATE TABLE "ap_keys" (
 	"owner_id" text NOT NULL,
 	"key_type" text NOT NULL,
@@ -24,3 +15,13 @@ CREATE TABLE "ap_keys" (
 	"c_date" date DEFAULT now() NOT NULL,
 	CONSTRAINT "ap_keys_owner_id_key_type_pk" PRIMARY KEY("owner_id","key_type")
 );
+--> statement-breakpoint
+CREATE TABLE "ap_object_references" (
+	"ap_object_id" text PRIMARY KEY NOT NULL,
+	"cc_uri" text NOT NULL,
+	"ref_type" text NOT NULL,
+	"meta" jsonb,
+	"c_date" date DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE INDEX "ap_object_references_cc_uri_idx" ON "ap_object_references" USING btree ("cc_uri");
