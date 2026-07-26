@@ -30,7 +30,7 @@ const logger = getLogger("activitypub");
 
 let entities: ApEntity[] = [];
 
-// 送信済みLike/リアクションのccfs集合。psubscribe("*")で流れてくる大量の
+// 送信済みLike/リアクションのccfs集合。psubscribe("cc-event:*")で流れてくる大量の
 // deleted イベントに対し、ブリッジ由来のものだけをDB照会するためのフィルタ。
 const outboundLikeCcfs = new Set<string>();
 
@@ -559,14 +559,23 @@ export const startEntityBroker = async () => {
     await loadOutboundLikes(); // 送信済みLikeのフィルタを初期化
     setInterval(refreshEntities, 60000); // Update entities every 60 seconds
 
-    redis.psubscribe("*", (err, count) => {
+    // concrntはrealtimeイベントをcc-event:プレフィックス付きchannelにpublishする
+    // (channel = "cc-event:" + リソースURI。payload内のsourceは生URIのまま)
+    const CC_EVENT_PREFIX = "cc-event:";
+
+    redis.psubscribe(`${CC_EVENT_PREFIX}*`, (err, count) => {
         if (err) {
             logger.error(`Failed to subscribe to Redis channels: ${err}`);
             return;
         }
     });
 
-    redis.on("pmessage", async (pattern, channel, message) => {
+    redis.on("pmessage", async (pattern, rawChannel, message) => {
+
+        if (!rawChannel.startsWith(CC_EVENT_PREFIX)) {
+            return;
+        }
+        const channel = rawChannel.slice(CC_EVENT_PREFIX.length);
 
         if (!channel.startsWith('ccfs://') && !channel.startsWith('cckv://')) {
             return; // Ignore irrelevant channels
