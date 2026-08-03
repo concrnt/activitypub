@@ -1,4 +1,4 @@
-import { boolean, pgTable, text, date, primaryKey, jsonb, index } from 'drizzle-orm/pg-core'
+import { boolean, pgTable, text, date, primaryKey, jsonb, index, timestamp } from 'drizzle-orm/pg-core'
 
 export const apEntity = pgTable("ap_entities", {
     id: text("id").notNull().primaryKey(),
@@ -47,3 +47,22 @@ export const apObjectReference = pgTable(
 
 export type ApObjectReferenceRow = typeof apObjectReference.$inferSelect;
 
+// Inbound Create に埋め込まれて配送されたオブジェクトの保存版。
+// 非公開オブジェクトは後から URL を再取得できないため、配送時の内容と受信者を保持する。
+export const apInboundObject = pgTable(
+    "ap_inbound_objects",
+    {
+        objectId: text("object_id").notNull().primaryKey(),
+        actorId: text("actor_id").notNull(),
+        object: jsonb("object").$type<Record<string, unknown>>().notNull(),
+        recipientCcids: text("recipient_ccids").array().notNull().default([]),
+        visibility: text("visibility").$type<"public" | "unlisted" | "followers" | "direct">().notNull(),
+        cDate: timestamp("c_date", { withTimezone: true }).notNull().defaultNow(),
+        updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    },
+    (table) => [
+        index("ap_inbound_objects_actor_id_idx").on(table.actorId),
+    ],
+);
+
+export type ApInboundObjectRow = typeof apInboundObject.$inferSelect;

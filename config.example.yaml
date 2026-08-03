@@ -12,3 +12,7 @@ concrnt:
   domain: concrnt.example.com
   privateKey: |
     replace-with-your-concrnt-private-key
+
+activitypub:
+  # Change only when preserving actor URLs from an existing installation.
+  actorPathSegment: users

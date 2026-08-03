@@ -5,10 +5,11 @@ import { cors } from "hono/cors";
 import { federation } from "@fedify/hono";
 import { getLogger } from "@logtape/logtape";
 import fedi from "./federation.ts";
-import { db, apEntity } from "./db/index.ts"
+import { db, apEntity, apInboundObject } from "./db/index.ts"
 import { eq } from "drizzle-orm";
 import { config } from "./config.ts";
 import * as followStore from "./followStore.ts";
+import { canReadInboundObject } from "./inbound.ts";
 
 const logger = getLogger("activitypub");
 
@@ -19,9 +20,16 @@ interface AuthInfo {
 
 const receiveAuthInfo = (c: HonoContext): AuthInfo | null => {
     const authInfoStr = c.req.header("cc-requester")
-    const authInfo = authInfoStr ? JSON.parse(authInfoStr) as AuthInfo : null;
     logger.debug(`Received request with auth info: ${authInfoStr}`);
-    return authInfo;
+    if (!authInfoStr) return null;
+
+    try {
+        const authInfo = JSON.parse(authInfoStr) as Partial<AuthInfo>;
+        return typeof authInfo.ccid === "string" ? { ccid: authInfo.ccid } : null;
+    } catch {
+        logger.warn("Received malformed cc-requester header");
+        return null;
+    }
 }
 
 
@@ -232,6 +240,7 @@ app.get("/ap/api/following", async (c) => {
 
 app.get("/ap/api/resolve", async (c) => {
     const ctx = fedi.createContext(c.req.raw, undefined);
+    const requester = receiveAuthInfo(c);
     let uri = c.req.query("uri")?.trim();
     if (typeof uri !== "string") {
         return c.json({ error: "Missing 'uri' query parameter" }, 400);
@@ -239,14 +248,25 @@ app.get("/ap/api/resolve", async (c) => {
     uri = decodeURIComponent(uri);
     uri = uri.replace(/^activity:\/\//, "https://");
 
-    return await ctx.lookupObject(uri, {crossOrigin: 'trust'}).then(async (obj) => {
-        if (obj) {
-            return c.json(await obj.toJsonLd() as object);
-        } else {
-            logger.info(`Object not found for URI: ${uri}`);
-            return c.json({ error: "Object not found" }, 404);
-        }
-    })
+    const stored = await db.select().from(apInboundObject)
+        .where(eq(apInboundObject.objectId, uri)).limit(1).then(res => res[0]);
+
+    if (stored && !canReadInboundObject(stored.visibility, stored.recipientCcids, requester?.ccid)) {
+        // Do not disclose whether a restricted object exists to non-recipients.
+        return c.json({ error: "Object not found" }, 404);
+    }
+
+    try {
+        const obj = await ctx.lookupObject(uri, { crossOrigin: 'trust' });
+        if (obj) return c.json(await obj.toJsonLd() as object);
+    } catch (error) {
+        logger.info(`Live lookup failed for URI ${uri}; checking the delivered snapshot: ${error}`);
+    }
+
+    if (stored) return c.json(stored.object);
+
+    logger.info(`Object not found for URI: ${uri}`);
+    return c.json({ error: "Object not found" }, 404);
 });
 
 export default app;

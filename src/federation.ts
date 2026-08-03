@@ -4,7 +4,7 @@ import type { Context } from "@fedify/fedify";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
 import { Redis } from "ioredis";
-import { db, apEntity, apKeys, apObjectReference } from './db/index.ts';
+import { db, apEntity, apKeys, apObjectReference, apInboundObject } from './db/index.ts';
 import { importJwk } from "@fedify/fedify";
 import { eq, and } from "drizzle-orm";
 import { CDID } from '@concrnt/client'
@@ -14,8 +14,11 @@ import { config } from "./config.ts";
 import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote } from "./convert.ts";
 import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, followerKey, acceptStateKey, type ApFollowerValue } from "./schemas.ts";
 import * as followStore from "./followStore.ts";
+import { collectAudience, determineInboundVisibility, type InboundVisibility } from "./inbound.ts";
 
 const logger = getLogger("activitypub");
+
+const actorPath = `/ap/${config.activitypub.actorPathSegment}`;
 
 // AP objectのURLから、ブリッジ管理下のconcrnt保存先キーを決定的に導出する
 const inboxKey = (url: string) =>
@@ -27,8 +30,89 @@ const getFollowerDistribution = async (actorUri: string): Promise<string[]> => {
         .map(ccid => `cckv://${ccid}/activitypub.concrnt.world/inbox`);
 };
 
+interface InboundDelivery {
+    recipientCcids: string[];
+    distributes: string[];
+    visibility: InboundVisibility;
+}
+
+const resolveInboundDelivery = async (
+    ctx: { parseUri: (uri: URL | null) => any },
+    actorUri: string,
+    activityTo: readonly URL[],
+    activityCc: readonly URL[],
+    objectTo: readonly URL[],
+    objectCc: readonly URL[],
+    followersUri?: string,
+): Promise<InboundDelivery> => {
+    const to = collectAudience(activityTo, objectTo);
+    const cc = collectAudience(activityCc, objectCc);
+    const audience = [...new Set([...to, ...cc])];
+    const visibility = determineInboundVisibility(to, cc, followersUri);
+    const recipientCcids = new Set<string>();
+
+    if (visibility !== "direct") {
+        for (const ccid of followStore.getLocalFollowerCcids(actorUri)) {
+            recipientCcids.add(ccid);
+        }
+    }
+
+    // Direct posts and explicitly addressed mentions must reach a local actor
+    // even when that actor does not follow the remote author.
+    for (const uri of audience) {
+        let parsed: ReturnType<typeof ctx.parseUri>;
+        try {
+            parsed = ctx.parseUri(new URL(uri));
+        } catch {
+            continue;
+        }
+        if (parsed == null || parsed.type !== "actor") continue;
+
+        const entity = await db.select().from(apEntity)
+            .where(eq(apEntity.id, parsed.identifier)).limit(1).then(res => res[0]);
+        if (entity?.enabled) recipientCcids.add(entity.ccid);
+    }
+
+    const recipients = [...recipientCcids];
+    return {
+        recipientCcids: recipients,
+        distributes: recipients.map((ccid) => `cckv://${ccid}/activitypub.concrnt.world/inbox`),
+        visibility,
+    };
+};
+
+const storeInboundObject = async (
+    objectId: string,
+    actorId: string,
+    object: Record<string, unknown>,
+    delivery: InboundDelivery,
+): Promise<void> => {
+    await db.insert(apInboundObject).values({
+        objectId,
+        actorId,
+        object,
+        recipientCcids: delivery.recipientCcids,
+        visibility: delivery.visibility,
+    }).onConflictDoUpdate({
+        target: apInboundObject.objectId,
+        set: {
+            actorId,
+            object,
+            recipientCcids: delivery.recipientCcids,
+            visibility: delivery.visibility,
+            updatedAt: new Date(),
+        },
+    });
+};
+
 // リモートnoteを参照ドキュメント(ap/note.json)としてconcrntに保存し、保存先キーを返す
-const storeApNote = async (noteURL: string, actorURL: string, createdAt: Date, distributes: string[]): Promise<string> => {
+const storeApNote = async (
+    noteURL: string,
+    actorURL: string,
+    createdAt: Date,
+    distributes: string[],
+    delivery?: InboundDelivery,
+): Promise<string> => {
     const key = inboxKey(noteURL);
     const document: CommitDocument<any> = {
         kind: 'record',
@@ -41,6 +125,17 @@ const storeApNote = async (noteURL: string, actorURL: string, createdAt: Date, d
         author: config.concrnt.ccid,
         createdAt,
         distributes,
+        ...(delivery && (delivery.visibility === "followers" || delivery.visibility === "direct")
+            ? {
+                policy: {
+                    entries: [{
+                        url: "https://policy.concrnt.world/t/restrict-readers.json",
+                        params: { entities: delivery.recipientCcids },
+                        defaults: { "record:read": "no" },
+                    }],
+                },
+            }
+            : {}),
     };
     await commit(document);
     return key;
@@ -197,7 +292,7 @@ federation.setNodeInfoDispatcher("/ap/nodeinfo/2.1", async (ctx) => {
 })
 
 federation
-    .setInboxListeners("/ap/users/{identifier}/inbox", "/ap/inbox")
+    .setInboxListeners(`${actorPath}/{identifier}/inbox`, "/ap/inbox")
     .on(Follow, async (ctx, follow) => {
 
         const object = ctx.parseUri(follow.objectId);
@@ -379,12 +474,6 @@ federation
             return;
         }
 
-        const distribution = await getFollowerDistribution(actorUri);
-        if (distribution.length === 0) {
-            logger.info(`Actor ${actorUri} has no followers. Skipping Create activity.`);
-            return;
-        }
-
         const object = await create.getObject();
         const objectUri = object?.id?.toString();
         if (object == null || objectUri == null) {
@@ -392,11 +481,30 @@ federation
             return;
         }
 
+        const actor = await create.getActor().catch(() => null);
+        const delivery = await resolveInboundDelivery(
+            ctx,
+            actorUri,
+            create.toIds,
+            create.ccIds,
+            object.toIds,
+            object.ccIds,
+            actor?.followersId?.href,
+        );
+        if (delivery.distributes.length === 0) {
+            logger.info(`Create ${objectUri} has no local recipients. Skipping.`);
+            return;
+        }
+
+        const snapshot = await object.toJsonLd() as Record<string, unknown>;
+        await storeInboundObject(objectUri, actorUri, snapshot, delivery);
+
         await storeApNote(
             objectUri,
             actorUri,
             object.published ? new Date(object.published.toString()) : new Date(),
-            distribution,
+            delivery.distributes,
+            delivery,
         );
     })
     .on(Announce, async (ctx, announce) => {
@@ -484,9 +592,26 @@ federation
         followStore.setAcceptState(key, entity.ccid, actorURI, 'rejected');
     })
     .on(Update, async (ctx, update) => {
-        // v2はリモートコンテンツをクライアント側でライブ解決するため、
-        // サーバー側で更新すべき状態は特にない。未処理警告の抑制のため受理だけする。
-        logger.debug(`Received Update activity from ${update.actorId}`);
+        const object = await update.getObject();
+        const objectId = object?.id?.href;
+        const actorId = update.actorId?.href;
+        if (object == null || objectId == null || actorId == null) return;
+
+        const stored = await db.select().from(apInboundObject)
+            .where(eq(apInboundObject.objectId, objectId)).limit(1).then(res => res[0]);
+        if (!stored) {
+            logger.debug(`Received Update for an object without a delivered snapshot: ${objectId}`);
+            return;
+        }
+        if (stored.actorId !== actorId) {
+            logger.warn(`Update actor mismatch for ${objectId}: ${actorId} vs ${stored.actorId}`);
+            return;
+        }
+
+        await db.update(apInboundObject).set({
+            object: await object.toJsonLd() as Record<string, unknown>,
+            updatedAt: new Date(),
+        }).where(eq(apInboundObject.objectId, objectId));
     })
     .on(EmojiReact, async (ctx, react) => {
         await handleLikeActivity(ctx, react);
@@ -519,6 +644,7 @@ federation
         }
 
         await commit(document);
+        await db.delete(apInboundObject).where(eq(apInboundObject.objectId, object.id.href));
     })
 ;
 
@@ -557,7 +683,7 @@ export const buildPerson = async (ctx: Context<unknown>, identifier: string): Pr
 
 // id・inbox・publicKey等の必須プロパティはbuildPerson内で設定している(静的解析の誤検知)
 // eslint-disable-next-line @fedify/lint/actor-id-required
-federation.setActorDispatcher("/ap/users/{identifier}", async (ctx, identifier) => {
+federation.setActorDispatcher(`${actorPath}/{identifier}`, async (ctx, identifier) => {
     return await buildPerson(ctx, identifier);
 }).setKeyPairsDispatcher(async (ctx, identifier) => {
 
@@ -593,7 +719,7 @@ federation.setActorDispatcher("/ap/users/{identifier}", async (ctx, identifier) 
 
 // Mastodon等のUI表示用の最小実装。投稿の列挙は今のところ提供しない。
 federation.setOutboxDispatcher(
-    "/ap/users/{identifier}/outbox",
+    `${actorPath}/{identifier}/outbox`,
     async (ctx, identifier) => {
         const users = await db.select().from(apEntity).where(eq(apEntity.id, identifier)).limit(1);
         if (users.length === 0) return null;
@@ -602,7 +728,7 @@ federation.setOutboxDispatcher(
 );
 
 federation.setFollowersDispatcher(
-    "/ap/users/{identifier}/followers",
+    `${actorPath}/{identifier}/followers`,
     async (ctx, identifier) => {
         const entity = await db.select().from(apEntity)
             .where(eq(apEntity.id, identifier)).limit(1).then(res => res[0]);
@@ -629,7 +755,7 @@ federation.setFollowersDispatcher(
 
 federation.setObjectDispatcher(
     Note,
-    "/ap/users/{identifier}/posts/{+id}",
+    `${actorPath}/{identifier}/posts/{+id}`,
     async (ctx, values) => {
 
         const entity = await db.select().from(apEntity).where(eq(apEntity.id, values.identifier)).limit(1);

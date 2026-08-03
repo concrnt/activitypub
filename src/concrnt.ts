@@ -4,7 +4,16 @@ import { config } from "./config.ts";
 // 現行コアは document.kind でディスパッチするが、npm公開版 @concrnt/client 2.0.1 の
 // Document 型には kind がまだ無い。クライアント更新までの間、ここで型を補う。
 export type DocumentKind = 'entity' | 'record' | 'association' | 'delete' | 'ack' | 'unack'
-export type CommitDocument<T> = Document<T> & { kind: DocumentKind }
+export type CommitDocument<T> = Document<T> & {
+    kind: DocumentKind
+    policy?: {
+        entries: Array<{
+            url: string
+            params?: Record<string, unknown>
+            defaults?: Record<string, string>
+        }>
+    }
+}
 
 const authProvider = new InMemoryAuthProvider(config.concrnt.privateKey);
 const kvs = new InMemoryKVS();

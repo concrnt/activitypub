@@ -19,6 +19,7 @@ export interface AppConfig {
   };
   activitypub: {
     baseUrl: string;
+    actorPathSegment: string;
   };
 }
 
@@ -74,6 +75,18 @@ const expectHost = (value: unknown, path: string): string => {
   return host;
 };
 
+const expectPathSegment = (value: unknown, path: string): string => {
+  const segment = expectString(value, path);
+
+  if (!/^[A-Za-z0-9._~-]+$/.test(segment)) {
+    throw new Error(
+      `Invalid config: "${path}" must be one URL path segment.`,
+    );
+  }
+
+  return segment;
+};
+
 const readConfig = (): AppConfig => {
   let source: string;
 
@@ -94,6 +107,9 @@ const readConfig = (): AppConfig => {
   const concrnt = expectRecord(root.concrnt, "concrnt");
   const concrntDomain = expectHost(concrnt.domain, "concrnt.domain");
   const activitypubBaseUrl = new URL(`https://${concrntDomain}`).origin;
+  const activitypub = root.activitypub == null
+    ? {}
+    : expectRecord(root.activitypub, "activitypub");
 
   const config: AppConfig = {
     server: {
@@ -112,6 +128,9 @@ const readConfig = (): AppConfig => {
     },
     activitypub: {
       baseUrl: activitypubBaseUrl,
+      actorPathSegment: activitypub.actorPathSegment == null
+        ? "users"
+        : expectPathSegment(activitypub.actorPathSegment, "activitypub.actorPathSegment"),
     },
   };
 
