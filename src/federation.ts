@@ -18,6 +18,7 @@ import {
     collectAudience,
     determineInboundVisibility,
     intersectInboundRecipients,
+    isMissingCommitTargetError,
     isRestrictedInboundVisibility,
     mostRestrictiveInboundVisibility,
     type InboundVisibility,
@@ -715,7 +716,12 @@ federation
             createdAt: new Date(),
         }
 
-        await commit(document);
+        try {
+            await commit(document);
+        } catch (error) {
+            if (!isMissingCommitTargetError(error)) throw error;
+            logger.info(`Delete target is already absent: ${object.id.href}`);
+        }
         await db.delete(apInboundObject).where(eq(apInboundObject.objectId, object.id.href));
     })
 ;

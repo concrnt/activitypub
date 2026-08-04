@@ -5,6 +5,7 @@ import {
     collectAudience,
     determineInboundVisibility,
     intersectInboundRecipients,
+    isMissingCommitTargetError,
     isRestrictedInboundVisibility,
     mostRestrictiveInboundVisibility,
 } from "./inbound.ts";
@@ -66,5 +67,19 @@ describe("restricted inbound delivery", () => {
             ["con1alice", "con1bob", "con1alice"],
             ["con1bob", "con1carol"],
         )).toEqual(["con1bob"]);
+    });
+});
+
+describe("isMissingCommitTargetError", () => {
+    test("recognizes the current core missing-record response", () => {
+        expect(isMissingCommitTargetError(new Error(
+            'commit failed: 500 {"error":"cckv://example not found\\nrecord not found"}',
+        ))).toBe(true);
+        expect(isMissingCommitTargetError("commit failed: 404 record not found")).toBe(true);
+    });
+
+    test("does not hide other commit failures", () => {
+        expect(isMissingCommitTargetError(new Error("commit failed: 500 database unavailable"))).toBe(false);
+        expect(isMissingCommitTargetError(new Error("network timeout"))).toBe(false);
     });
 });

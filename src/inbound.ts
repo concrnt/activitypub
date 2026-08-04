@@ -51,3 +51,10 @@ export const intersectInboundRecipients = (
     const allowed = new Set(second);
     return [...new Set(first)].filter((ccid) => allowed.has(ccid));
 };
+
+export const isMissingCommitTargetError = (error: unknown): boolean => {
+    const message = error instanceof Error
+        ? error.message
+        : typeof error === "string" ? error : "";
+    return /^commit failed: (?:404|500)\b[\s\S]*\b(?:record )?not found\b/i.test(message);
+};
