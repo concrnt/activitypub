@@ -9,7 +9,7 @@ import { db, apEntity, apInboundObject } from "./db/index.ts"
 import { eq } from "drizzle-orm";
 import { config } from "./config.ts";
 import * as followStore from "./followStore.ts";
-import { canReadInboundObject } from "./inbound.ts";
+import { canReadInboundObject, isRestrictedInboundVisibility } from "./inbound.ts";
 
 const logger = getLogger("activitypub");
 
@@ -254,6 +254,13 @@ app.get("/ap/api/resolve", async (c) => {
     if (stored && !canReadInboundObject(stored.visibility, stored.recipientCcids, requester?.ccid)) {
         // Do not disclose whether a restricted object exists to non-recipients.
         return c.json({ error: "Object not found" }, 404);
+    }
+
+    // Followers-only/direct objects often cannot be dereferenced after inbox
+    // delivery.  Once the requester is authorized, prefer the exact payload
+    // received at delivery time instead of waiting for a remote 404.
+    if (stored && isRestrictedInboundVisibility(stored.visibility)) {
+        return c.json(stored.object);
     }
 
     try {

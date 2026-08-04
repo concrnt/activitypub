@@ -4,6 +4,9 @@ import {
     canReadInboundObject,
     collectAudience,
     determineInboundVisibility,
+    intersectInboundRecipients,
+    isRestrictedInboundVisibility,
+    mostRestrictiveInboundVisibility,
 } from "./inbound.ts";
 
 describe("collectAudience", () => {
@@ -42,5 +45,26 @@ describe("canReadInboundObject", () => {
         expect(canReadInboundObject("followers", ["con1recipient"], "con1recipient")).toBe(true);
         expect(canReadInboundObject("direct", ["con1recipient"], "con1other")).toBe(false);
         expect(canReadInboundObject("direct", ["con1recipient"], undefined)).toBe(false);
+    });
+});
+
+describe("restricted inbound delivery", () => {
+    test("identifies restricted visibility", () => {
+        expect(isRestrictedInboundVisibility("public")).toBe(false);
+        expect(isRestrictedInboundVisibility("unlisted")).toBe(false);
+        expect(isRestrictedInboundVisibility("followers")).toBe(true);
+        expect(isRestrictedInboundVisibility("direct")).toBe(true);
+    });
+
+    test("keeps the more restrictive visibility", () => {
+        expect(mostRestrictiveInboundVisibility("public", "followers")).toBe("followers");
+        expect(mostRestrictiveInboundVisibility("direct", "unlisted")).toBe("direct");
+    });
+
+    test("intersects recipients without duplicates", () => {
+        expect(intersectInboundRecipients(
+            ["con1alice", "con1bob", "con1alice"],
+            ["con1bob", "con1carol"],
+        )).toEqual(["con1bob"]);
     });
 });
