@@ -11,6 +11,7 @@
 // 対象外(公開レコード前提)。
 
 import { getLogger } from "@logtape/logtape";
+import type { SignedDocument } from "@concrnt/client";
 
 import concrntApi from "./concrnt.ts";
 import { config } from "./config.ts";
@@ -102,6 +103,12 @@ export const getFollowing = (ccid: string): Array<FollowingEntry & { status: Fol
 export const getFollowers = (ccid: string): FollowerEntry[] =>
     [...(followersByCcid.get(ccid)?.values() ?? [])];
 
+// リモートactorが消滅した際の掃除用: 全ローカルエンティティ横断でそのactorのfollowerエントリを引く
+export const getFollowersByActorURI = (actorURI: string): FollowerEntry[] =>
+    [...followersByCcid.values()]
+        .map(inner => inner.get(actorURI))
+        .filter((e): e is FollowerEntry => e != null);
+
 // リモートアクターをフォローしている(rejectedでない)ローカルccid一覧
 export const getLocalFollowerCcids = (actorURI: string): string[] =>
     [...(followingReverse.get(actorURI) ?? [])]
@@ -109,7 +116,13 @@ export const getLocalFollowerCcids = (actorURI: string): string[] =>
 
 interface LoadedRecord { key: string, schema: string, value: any, author: string, createdAt: string }
 
-// query APIはlimit上限100・sinceは閉区間なので、キーで重複排除しながらページングする
+// query APIのレスポンス封筒。@concrnt/client 2.0.1 の型定義は旧配列形式のままなので
+// クライアント更新までの間、ここで型を補う。
+interface QueryPage { items: SignedDocument[], prev: string | null, next: string | null }
+
+// nextカーソルが尽きるまでページングする。sinceは閉区間なので境界行が重複して
+// 返るため、キーで重複排除する。itemsは読取権限フィルタ後の内容なので、
+// 空ページでもnextがあれば継続する必要がある。
 const queryAllByPrefix = async (prefix: string, schema: string): Promise<LoadedRecord[]> => {
     const results = new Map<string, LoadedRecord>();
     let since: string | undefined = undefined;
@@ -118,21 +131,17 @@ const queryAllByPrefix = async (prefix: string, schema: string): Promise<LoadedR
         const page = await concrntApi.query(
             { prefix, schema, limit: 100, order: 'asc', since },
             config.concrnt.domain,
-        );
+        ) as unknown as QueryPage;
 
-        let newCount = 0;
-        let lastCreatedAt: string | undefined = since;
-        for (const sd of page) {
+        for (const sd of page.items) {
             const doc = JSON.parse(sd.document);
             const key = sd.cckv;
             if (!key) continue;
-            if (!results.has(key)) newCount++;
             results.set(key, { key, schema: doc.schema, value: doc.value, author: doc.author, createdAt: doc.createdAt });
-            lastCreatedAt = doc.createdAt;
         }
 
-        if (page.length < 100 || newCount === 0) break;
-        since = lastCreatedAt;
+        if (page.next === null || page.next === since) break;
+        since = page.next;
     }
 
     return [...results.values()];

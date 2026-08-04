@@ -34,12 +34,6 @@ const receiveAuthInfo = (c: HonoContext): AuthInfo | null => {
 
 
 const app = new Hono();
-app.use(federation(fedi, () => undefined));
-app.use(cors({
-    origin: "*",
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization"],
-}));
 
 interface ApServerInfo {
     serviceAccountId: string
@@ -62,10 +56,23 @@ const ccEndpoints: Record<string, string> = {
     "net.concrnt.activitypub.resolve":   "/ap/api/resolve?uri={uri}",
 };
 
+// 以下2つは定期ポーリングされるため、fedifyミドルウェアより前に登録して
+// fedify·federation·http のアクセスログ(毎リクエストINFO)に乗せない。
+
 // concrnt本体が services 登録済みサービスへ直接ポーリングするサービス広告
 app.get("/cc-info", (c) =>
     c.json({ name: pkg.name, version: pkg.version, endpoints: ccEndpoints })
 );
+
+// livenessProbe用ヘルスチェック
+app.get("/health", (c) => c.json({ status: "ok" }));
+
+app.use(federation(fedi, () => undefined));
+app.use(cors({
+    origin: "*",
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization"],
+}));
 
 app.get("/ap", (c) => c.text("Hello, Fedify!"));
 
@@ -78,17 +85,6 @@ app.get("/ap/api/info", async (c) => {
     return c.json(serverInfo);
 });
 
-
-
-app.get("/ap/test", async (c) => {
-
-    const authInfo = receiveAuthInfo(c);
-
-    return c.json({ 
-        message: "Hello from the API!",
-        authInfo,
-    });
-});
 
 app.post("/ap/api/setup", async (c) => {
 
@@ -265,7 +261,21 @@ app.get("/ap/api/resolve", async (c) => {
 
     try {
         const obj = await ctx.lookupObject(uri, { crossOrigin: 'trust' });
-        if (obj) return c.json(await obj.toJsonLd() as object);
+        if (obj) {
+            const jsonLd = await obj.toJsonLd() as Record<string, unknown>;
+            // Fedify vocab drops unknown Misskey extension properties during
+            // JSON-LD conversion, so restore them from the source document.
+            try {
+                const raw = await ctx.documentLoader(obj.id?.href ?? uri);
+                const rawDoc = raw.document as Record<string, unknown>;
+                for (const key of Object.keys(rawDoc)) {
+                    if (key.startsWith("_misskey_")) jsonLd[key] = rawDoc[key];
+                }
+            } catch (error) {
+                logger.debug(`Failed to fetch raw document for ${uri}: ${error}`);
+            }
+            return c.json(jsonLd);
+        }
     } catch (error) {
         logger.info(`Live lookup failed for URI ${uri}; checking the delivered snapshot: ${error}`);
     }

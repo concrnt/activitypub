@@ -105,7 +105,11 @@ export const buildNote = async (
     const noteId = ctx.getObjectUri(Note, values);
     const actorUri = ctx.getActorUri(values.identifier);
     const followersUri = ctx.getFollowersUri(values.identifier);
-    const published = Temporal.Instant.from(new Date(document.createdAt).toISOString());
+    // fedifyは型をTS標準lib(esnext.temporal)のTemporalで宣言するが実行時は
+    // @js-temporal/polyfillを使う。polyfillの型とは構造非互換(sign: numberと-1|0|1等)
+    // なので、コンストラクタ引数から期待型を導出してキャストする。
+    type FedifyInstant = NonNullable<NonNullable<ConstructorParameters<typeof Note>[0]>["published"]>;
+    const published = Temporal.Instant.from(new Date(document.createdAt).toISOString()) as unknown as FedifyInstant;
 
     if (document.schema === SCHEMA_REROUTE) {
         const body = document.value?.body?.trim();

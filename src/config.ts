@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { ComputeCCID, LoadKey } from "@concrnt/client";
 import { parse } from "yaml";
 
 export interface AppConfig {
@@ -13,7 +14,7 @@ export interface AppConfig {
     url: string;
   };
   concrnt: {
-    ccid: string;
+    ccid: string; // derived from privateKey
     domain: string;
     privateKey: string;
   };
@@ -110,6 +111,13 @@ const readConfig = (): AppConfig => {
   const activitypub = root.activitypub == null
     ? {}
     : expectRecord(root.activitypub, "activitypub");
+  const concrntPrivateKey = expectString(concrnt.privateKey, "concrnt.privateKey").trim();
+  const keypair = LoadKey(concrntPrivateKey);
+  if (!keypair) {
+    throw new Error(
+      'Invalid config: "concrnt.privateKey" is not a valid secp256k1 private key.',
+    );
+  }
 
   const config: AppConfig = {
     server: {
@@ -122,9 +130,9 @@ const readConfig = (): AppConfig => {
       url: expectString(redis.url, "redis.url"),
     },
     concrnt: {
-      ccid: expectString(concrnt.ccid, "concrnt.ccid"),
+      ccid: ComputeCCID(keypair.publickey),
       domain: concrntDomain,
-      privateKey: expectString(concrnt.privateKey, "concrnt.privateKey"),
+      privateKey: concrntPrivateKey,
     },
     activitypub: {
       baseUrl: activitypubBaseUrl,
