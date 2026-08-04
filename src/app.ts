@@ -241,7 +241,18 @@ app.get("/ap/api/resolve", async (c) => {
 
     return await ctx.lookupObject(uri, {crossOrigin: 'trust'}).then(async (obj) => {
         if (obj) {
-            return c.json(await obj.toJsonLd() as object);
+            const jsonLd = await obj.toJsonLd() as Record<string, unknown>;
+            // fedifyのvocabは_misskey_content等の未知プロパティをJSON-LD変換で落とすため、生JSONから拾い直す
+            try {
+                const raw = await ctx.documentLoader(obj.id?.href ?? uri);
+                const rawDoc = raw.document as Record<string, unknown>;
+                for (const key of Object.keys(rawDoc)) {
+                    if (key.startsWith("_misskey_")) jsonLd[key] = rawDoc[key];
+                }
+            } catch (e) {
+                logger.debug(`failed to fetch raw document for ${uri}: ${e}`);
+            }
+            return c.json(jsonLd);
         } else {
             logger.info(`Object not found for URI: ${uri}`);
             return c.json({ error: "Object not found" }, 404);

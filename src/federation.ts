@@ -520,6 +520,20 @@ federation
 
         await commit(document);
     })
+    // 署名検証に失敗した配送の送信元と対象を記録する(戻り値なし=従来通り401で拒否)
+    .onUnverifiedActivity((_ctx, activity, reason) => {
+        const keyId = "keyId" in reason ? reason.keyId?.href : undefined;
+        const fetchStatus =
+            reason.type === "keyFetchError" && "status" in reason.result
+                ? reason.result.status
+                : undefined;
+        logger.warn(
+            `Rejected unverified inbox delivery: reason=${reason.type}` +
+            ` key=${keyId} fetchStatus=${fetchStatus}` +
+            ` actor=${activity.actorId?.href} activity=${activity.id?.href}` +
+            ` object=${activity.objectId?.href}`,
+        );
+    })
 ;
 
 
