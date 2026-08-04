@@ -9,5 +9,10 @@ redis:
 
 concrnt:
   domain: concrnt.example.com
-  # ccidはprivateKeyから導出されるため設定不要
-  privateKey: replace-with-your-concrnt-private-key
+  # ccid is derived from privateKey and does not need to be configured.
+  privateKey: |
+    replace-with-your-concrnt-private-key
+
+activitypub:
+  # Change only when preserving actor URLs from an existing installation.
+  actorPathSegment: users
