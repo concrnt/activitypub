@@ -197,7 +197,7 @@ federation.setNodeInfoDispatcher("/ap/nodeinfo/2.1", async (ctx) => {
 })
 
 federation
-    .setInboxListeners("/ap/users/{identifier}/inbox", "/ap/inbox")
+    .setInboxListeners("/ap/acct/{identifier}/inbox", "/ap/inbox")
     .on(Follow, async (ctx, follow) => {
 
         const object = ctx.parseUri(follow.objectId);
@@ -557,7 +557,7 @@ export const buildPerson = async (ctx: Context<unknown>, identifier: string): Pr
 
 // id・inbox・publicKey等の必須プロパティはbuildPerson内で設定している(静的解析の誤検知)
 // eslint-disable-next-line @fedify/lint/actor-id-required
-federation.setActorDispatcher("/ap/users/{identifier}", async (ctx, identifier) => {
+federation.setActorDispatcher("/ap/acct/{identifier}", async (ctx, identifier) => {
     return await buildPerson(ctx, identifier);
 }).setKeyPairsDispatcher(async (ctx, identifier) => {
 
@@ -593,7 +593,7 @@ federation.setActorDispatcher("/ap/users/{identifier}", async (ctx, identifier) 
 
 // Mastodon等のUI表示用の最小実装。投稿の列挙は今のところ提供しない。
 federation.setOutboxDispatcher(
-    "/ap/users/{identifier}/outbox",
+    "/ap/acct/{identifier}/outbox",
     async (ctx, identifier) => {
         const users = await db.select().from(apEntity).where(eq(apEntity.id, identifier)).limit(1);
         if (users.length === 0) return null;
@@ -602,7 +602,7 @@ federation.setOutboxDispatcher(
 );
 
 federation.setFollowersDispatcher(
-    "/ap/users/{identifier}/followers",
+    "/ap/acct/{identifier}/followers",
     async (ctx, identifier) => {
         const entity = await db.select().from(apEntity)
             .where(eq(apEntity.id, identifier)).limit(1).then(res => res[0]);
@@ -629,7 +629,7 @@ federation.setFollowersDispatcher(
 
 federation.setObjectDispatcher(
     Note,
-    "/ap/users/{identifier}/posts/{+id}",
+    "/ap/acct/{identifier}/posts/{+id}",
     async (ctx, values) => {
 
         const entity = await db.select().from(apEntity).where(eq(apEntity.id, values.identifier)).limit(1);
