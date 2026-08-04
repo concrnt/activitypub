@@ -510,6 +510,12 @@ federation
             return;
         }
 
+        // アカウント削除(objectがactor自身)はnoteの保存キーを持たないため対象なし
+        if (object.id.href === del.actorId.href) {
+            logger.debug(`Ignoring account deletion from ${del.actorId.href}`);
+            return;
+        }
+
         const document: CommitDocument<any> = {
             kind: 'delete',
             schema: SCHEMA_DELETE,
@@ -518,7 +524,17 @@ federation
             createdAt: new Date(),
         }
 
-        await commit(document);
+        try {
+            await commit(document);
+        } catch (error) {
+            // 保存していないnoteのDeleteは冪等に成功扱いにする
+            // (throwするとfedifyが無駄にリトライし続ける)
+            if (String(error).includes("not found")) {
+                logger.debug(`Delete for unstored object ${object.id.href}: ${error}`);
+                return;
+            }
+            throw error;
+        }
     })
     // 署名検証に失敗した配送の送信元と対象を記録する(戻り値なし=従来通り401で拒否)
     .onUnverifiedActivity((_ctx, activity, reason) => {
