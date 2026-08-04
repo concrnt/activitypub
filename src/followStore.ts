@@ -103,6 +103,12 @@ export const getFollowing = (ccid: string): Array<FollowingEntry & { status: Fol
 export const getFollowers = (ccid: string): FollowerEntry[] =>
     [...(followersByCcid.get(ccid)?.values() ?? [])];
 
+// リモートactorが消滅した際の掃除用: 全ローカルエンティティ横断でそのactorのfollowerエントリを引く
+export const getFollowersByActorURI = (actorURI: string): FollowerEntry[] =>
+    [...followersByCcid.values()]
+        .map(inner => inner.get(actorURI))
+        .filter((e): e is FollowerEntry => e != null);
+
 // リモートアクターをフォローしている(rejectedでない)ローカルccid一覧
 export const getLocalFollowerCcids = (actorURI: string): string[] =>
     [...(followingReverse.get(actorURI) ?? [])]

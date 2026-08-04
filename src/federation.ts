@@ -172,9 +172,43 @@ const handleLikeActivity = async (ctx: { parseUri: (uri: URL | null) => any }, a
     }
 };
 
+// 消滅したリモートactorのfollowerレコードを全ローカルエンティティから削除する
+const purgeFollower = async (actorURI: string, cause: string) => {
+    for (const entry of followStore.getFollowersByActorURI(actorURI)) {
+        logger.info(`Purging follower ${actorURI} of ${entry.ccid}: ${cause}`);
+        await commit({
+            kind: 'delete',
+            schema: SCHEMA_DELETE,
+            value: entry.key,
+            author: config.concrnt.ccid,
+            createdAt: new Date(),
+        }).catch((error) => {
+            // レコードが元々存在しない場合も先へ進む(冪等)
+            logger.warn(`Failed to delete follower record ${entry.key}: ${error}`);
+        });
+        followStore.removeFollowerByKey(entry.key);
+    }
+};
+
 const federation = createFederation({
     kv: new RedisKvStore(new Redis(config.redis.url)),
     queue: new RedisMessageQueue(() => new Redis(config.redis.url)),
+    // 配送失敗(リトライ毎)の観測用。LogTapeのproperties非表示問題を避けて本文に埋め込む
+    onOutboxError: (error, activity) => {
+        logger.warn(`Outbox delivery failure: activity=${activity?.id?.href} error=${error}`);
+    },
+});
+
+// 410 Goneを返したinboxのフォロワーは消滅済みとみなして掃除する。
+// 404は一時的な設定ミスの可能性があるため、circuit-breaker-ttl(7日不達)とともにログのみ。
+federation.setOutboxPermanentFailureHandler(async (_ctx, { reason, inbox, statusCode, actorIds, activity }) => {
+    if (reason === "http" && statusCode === 410) {
+        for (const actorId of actorIds) {
+            await purgeFollower(actorId.href, `inbox ${inbox.href} returned 410 Gone`);
+        }
+        return;
+    }
+    logger.warn(`Permanent delivery failure (${reason}, status=${statusCode}): activity=${activity.id?.href} inbox=${inbox.href}`);
 });
 
 federation.setNodeInfoDispatcher("/ap/nodeinfo/2.1", async (ctx) => {
@@ -537,12 +571,29 @@ federation
         }
     })
     // 署名検証に失敗した配送の送信元と対象を記録する(戻り値なし=従来通り401で拒否)
-    .onUnverifiedActivity((_ctx, activity, reason) => {
+    .onUnverifiedActivity(async (_ctx, activity, reason) => {
         const keyId = "keyId" in reason ? reason.keyId?.href : undefined;
         const fetchStatus =
             reason.type === "keyFetchError" && "status" in reason.result
                 ? reason.result.status
                 : undefined;
+
+        // 消滅済みactorのDelete(actor)は鍵取得が410になり署名検証できない。
+        // 401で拒否するとリモートが再配送し続けるため、actorのサーバー自身が
+        // 鍵の消滅を主張している(keyIdがactorと同一オリジン)場合に限り202で受理し、
+        // followerレコードを掃除する。
+        if (
+            fetchStatus === 410 &&
+            activity instanceof Delete &&
+            activity.actorId != null &&
+            activity.objectId?.href === activity.actorId.href &&
+            reason.type === "keyFetchError" &&
+            reason.keyId.origin === activity.actorId.origin
+        ) {
+            await purgeFollower(activity.actorId.href, `actor deleted (key fetch returned 410)`);
+            return new Response(null, { status: 202 });
+        }
+
         logger.warn(
             `Rejected unverified inbox delivery: reason=${reason.type}` +
             ` key=${keyId} fetchStatus=${fetchStatus}` +
