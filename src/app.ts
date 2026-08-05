@@ -215,20 +215,21 @@ app.get("/ap/api/resolve", async (c) => {
     uri = uri.replace(/^activity:\/\//, "https://");
 
     const authInfo = receiveAuthInfo(c);
+    const entity = authInfo
+        ? await db.select().from(apEntity).where(eq(apEntity.ccid, authInfo.ccid)).limit(1).then(res => res[0])
+        : undefined;
 
-    // キャッシュヒットなら即返す。非publicオブジェクトは受信時に配送対象だった
-    // ユーザーに限定し、許可がない場合はリモートfetchへフォールスルーして
-    // 可否をリモートに委ねる
+    // キャッシュヒットかつ閲覧可(読み出し時評価)なら即返す。許可がない場合は
+    // リモートfetchへフォールスルーして可否をリモートに委ねる
     const cached = await objectCache.getObject(uri);
-    if (cached && (cached.public || (authInfo != null && cached.allowedCcids.includes(authInfo.ccid)))) {
+    if (cached && objectCache.isVisibleTo(cached, authInfo
+        ? { ccid: authInfo.ccid, actorUri: entity ? ctx.getActorUri(entity.id).href : undefined }
+        : null)) {
         return c.json(cached.json);
     }
 
     // authorized fetch実装向けに、リクエストユーザー(AP未セットアップならインスタンス
     // アクター)の鍵で署名して解決する
-    const entity = authInfo
-        ? await db.select().from(apEntity).where(eq(apEntity.ccid, authInfo.ccid)).limit(1).then(res => res[0])
-        : undefined;
     const documentLoader = await ctx.getDocumentLoader({ identifier: entity?.id ?? INSTANCE_ACTOR });
 
     return await ctx.lookupObject(uri, { crossOrigin: 'trust', documentLoader }).then(async (obj) => {
@@ -245,14 +246,14 @@ app.get("/ap/api/resolve", async (c) => {
                 logger.debug(`failed to fetch raw document for ${uri}: ${e}`);
             }
             // publicオブジェクトはresolve結果もキャッシュしてリモートfetchを減らす
+            // (非publicのresolve結果はリモートの認可が要求者個人に紐づくため保存しない)
             const addressed = [...obj.toIds, ...obj.ccIds].map(u => u.href);
             if (addressed.includes(PUBLIC_COLLECTION.href)) {
                 const canonical = obj.id?.href ?? uri;
                 await objectCache.putObject(canonical, {
                     json: jsonLd,
                     actorUri: obj.attributionId?.href ?? '',
-                    public: true,
-                    allowedCcids: [],
+                    addressed,
                     receivedAt: new Date().toISOString(),
                 });
                 if (canonical !== uri) await objectCache.putAlias(uri, canonical);

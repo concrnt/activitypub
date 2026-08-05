@@ -1,6 +1,7 @@
 import { Redis } from "ioredis";
-import type { Object as ApObject } from "@fedify/vocab";
+import { PUBLIC_COLLECTION, type Object as ApObject } from "@fedify/vocab";
 import { config } from "./config.ts";
+import * as followStore from "./followStore.ts";
 
 // inbox受信・resolve済みAPオブジェクトの本文キャッシュ。DBには保存しない純粋な
 // TTL付きキャッシュで、リモートへのfetch回数削減と即応答が目的。副次的に、
@@ -13,14 +14,28 @@ const ALIAS_PREFIX = "apcache:alias:";
 export interface CachedApObject {
     json: Record<string, unknown>;
     actorUri: string;
-    // to/cc に as:Public を含むオブジェクトは誰にでも返せる
-    public: boolean;
-    // 非publicオブジェクトを閲覧できるccid。受信時に配送対象だったローカル
-    // フォロワー+宛先ローカルユーザーのスナップショットで、読み出し時の
-    // フォロー再判定はしない
-    allowedCcids: string[];
+    // 生の宛先(object側+activity側のto/ccのunion)。閲覧可否は読み出し時に評価する
+    addressed: string[];
+    // 投稿者のfollowersコレクションURI(受信時にactorから取得できた場合)
+    followersUri?: string;
     receivedAt: string;
 }
+
+// 閲覧可否の読み出し時評価(fedify docsのpost.isVisibleTo()相当)。
+// 全てローカル情報で判定するためネットワーク往復はない。フォロー解除で失効し、
+// 受信後の新規フォロワーにも見える(本家Misskeyの挙動と一致)。
+export const isVisibleTo = (entry: CachedApObject, requester: { ccid: string; actorUri?: string } | null): boolean => {
+    if (entry.addressed.includes(PUBLIC_COLLECTION.href)) return true;
+    if (requester == null) return false;
+    // DM/メンション: 本人のactor URIが宛先に含まれる
+    if (requester.actorUri != null && entry.addressed.includes(requester.actorUri)) return true;
+    // フォロワー限定: followersコレクションが宛先に含まれ、かつ現在フォロー中。
+    // followersUri未取得時は<actorUri>/followersの慣行(Misskey/Mastodon/GTS)で代用。
+    // フォロー中でも宛先条件を必須にすることでDMが開放されないようにする
+    const followersUri = entry.followersUri ?? entry.actorUri + "/followers";
+    return entry.addressed.includes(followersUri)
+        && followStore.getLocalFollowerCcids(entry.actorUri).includes(requester.ccid);
+};
 
 const redis = new Redis(config.redis.url);
 
@@ -65,7 +80,9 @@ export const getObject = async (uri: string): Promise<CachedApObject | null> => 
         raw = await redis.get(OBJECT_PREFIX + canonical);
     }
     if (raw == null) return null;
-    return JSON.parse(raw) as CachedApObject;
+    const entry = JSON.parse(raw) as CachedApObject;
+    if (!Array.isArray(entry.addressed)) return null; // 旧形状エントリはミス扱い
+    return entry;
 };
 
 export const deleteObject = async (uri: string): Promise<void> => {

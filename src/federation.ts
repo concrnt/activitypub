@@ -1,5 +1,5 @@
 import { createFederation, exportJwk, generateCryptoKeyPair } from "@fedify/fedify";
-import { Person, Application, Follow, Endpoints, Accept, Reject, Undo, Note, type Recipient, Create, Like, Delete, Announce, EmojiReact, Emoji, Image, Update, type Actor, PUBLIC_COLLECTION } from "@fedify/vocab";
+import { Person, Application, Follow, Endpoints, Accept, Reject, Undo, Note, type Recipient, Create, Like, Delete, Announce, EmojiReact, Emoji, Image, Update, type Actor } from "@fedify/vocab";
 import type { Context } from "@fedify/fedify";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
@@ -433,24 +433,14 @@ federation
         }
 
         // 本文をキャッシュする。非publicノート(Misskeyのフォロワー限定等)は
-        // リモートに再fetchできないため、閲覧許可は受信時の配送対象で固定する
-        const addressed = [...object.toIds, ...object.ccIds, ...create.toIds, ...create.ccIds].map(u => u.href);
-        const isPublic = addressed.includes(PUBLIC_COLLECTION.href);
-        const allowedCcids = isPublic ? [] : [...followerCcids];
-        if (!isPublic) {
-            for (const uri of addressed) { // DM/メンションの宛先ローカルユーザー
-                const parsedUri = ctx.parseUri(new URL(uri));
-                if (parsedUri?.type !== "actor") continue;
-                const entity = await db.select().from(apEntity)
-                    .where(eq(apEntity.id, parsedUri.identifier)).limit(1).then(res => res[0]);
-                if (entity && !allowedCcids.includes(entity.ccid)) allowedCcids.push(entity.ccid);
-            }
-        }
+        // リモートに再fetchできないため、生の宛先を保存して閲覧可否は
+        // 読み出し時にisVisibleToで評価する
+        const actor = await create.getActor().catch(() => null);
         await objectCache.putObject(objectUri, {
             json: await objectCache.buildCacheJson(object, create),
             actorUri,
-            public: isPublic,
-            allowedCcids,
+            addressed: [...object.toIds, ...object.ccIds, ...create.toIds, ...create.ccIds].map(u => u.href),
+            followersUri: actor?.followersId?.href,
             receivedAt: new Date().toISOString(),
         });
 
