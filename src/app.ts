@@ -221,9 +221,10 @@ app.get("/ap/api/following", async (c) => {
 
     // フォローはユーザー署名のcckvレコード(follows/)がsource of truth。
     // フォロー・アンフォロー操作はクライアントがレコードをcommit/deleteすることで行う。
+    // レスポンス: { actorURI: string, status: 'accepted' | 'pending' }[]
     const following = followStore.getFollowing(entity.ccid)
         .filter(f => f.status !== 'rejected')
-        .map(f => f.actorURI);
+        .map(f => ({ actorURI: f.actorURI, status: f.status as 'accepted' | 'pending' }));
 
     return c.json(following);
 });
