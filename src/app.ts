@@ -4,7 +4,8 @@ import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { federation } from "@fedify/hono";
 import { getLogger } from "@logtape/logtape";
-import fedi, { INSTANCE_ACTOR } from "./federation.ts";
+import fedi, { INSTANCE_ACTOR, storeApNote } from "./federation.ts";
+import { Note } from "@fedify/vocab";
 import { db, apEntity } from "./db/index.ts"
 import { eq } from "drizzle-orm";
 import { config } from "./config.ts";
@@ -46,6 +47,7 @@ const ccEndpoints: Record<string, string> = {
     "net.concrnt.activitypub.followers": "/ap/api/followers",
     "net.concrnt.activitypub.following": "/ap/api/following",
     "net.concrnt.activitypub.resolve":   "/ap/api/resolve?uri={uri}",
+    "net.concrnt.activitypub.import":    "/ap/api/import",     // POST {uri}
 };
 
 // 以下2つは定期ポーリングされるため、fedifyミドルウェアより前に登録して
@@ -238,6 +240,63 @@ app.get("/ap/api/resolve", async (c) => {
             return c.json({ error: "Object not found" }, 404);
         }
     })
+});
+
+// リモートnoteをオンデマンドでconcrntレコード(ap/note.json)として実体化する。
+// プッシュ受信(Create/Announce)を経ていないnoteをクライアントが詳細ビューで扱えるようにするための入口。
+app.post("/ap/api/import", async (c) => {
+    const authInfo = receiveAuthInfo(c);
+    if (!authInfo) {
+        return c.json({ error: "Missing authentication information" }, 400);
+    }
+
+    let uri: unknown;
+    try {
+        uri = (await c.req.json()).uri;
+    } catch {
+        return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    if (typeof uri !== "string" || uri.trim() === "") {
+        return c.json({ error: "Missing 'uri' in request body" }, 400);
+    }
+    uri = decodeURIComponent(uri.trim()).replace(/^activity:\/\//, "https://");
+
+    // AP未セットアップのユーザーでも実体化は許可する(署名主体だけ使い分ける)
+    const entity = await db.select().from(apEntity)
+        .where(eq(apEntity.ccid, authInfo.ccid)).limit(1).then(res => res[0]);
+
+    const ctx = fedi.createContext(c.req.raw, undefined);
+    const documentLoader = await ctx.getDocumentLoader({ identifier: entity?.id ?? INSTANCE_ACTOR });
+
+    let obj;
+    try {
+        obj = await ctx.lookupObject(uri as string, { crossOrigin: 'trust', documentLoader });
+    } catch (e) {
+        logger.info(`import: failed to resolve ${uri}: ${e}`);
+        return c.json({ error: "Failed to fetch remote object" }, 502);
+    }
+    if (!obj) {
+        return c.json({ error: "Object not found" }, 404);
+    }
+    if (!(obj instanceof Note) || !obj.id) {
+        return c.json({ error: "Object is not a Note" }, 422);
+    }
+    const actorURL = obj.attributionId?.href;
+    if (!actorURL) {
+        return c.json({ error: "Note has no attributedTo" }, 422);
+    }
+
+    // キーは正準ID(obj.id)から導出する。決定的キーへの再commitなので冪等。
+    // 配送はしない(詳細ビューから参照できれば十分。Announce内側noteと同じ扱い)。
+    const key = await storeApNote(
+        obj.id.href,
+        actorURL,
+        obj.published ? new Date(obj.published.toString()) : new Date(),
+        [],
+    );
+
+    logger.info(`import: stored ${obj.id.href} as ${key} (requested by ${authInfo.ccid})`);
+    return c.json({ key });
 });
 
 export default app;

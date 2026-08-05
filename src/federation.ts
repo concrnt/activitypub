@@ -33,7 +33,7 @@ const getFollowerDistribution = async (actorUri: string): Promise<string[]> => {
 };
 
 // リモートnoteを参照ドキュメント(ap/note.json)としてconcrntに保存し、保存先キーを返す
-const storeApNote = async (noteURL: string, actorURL: string, createdAt: Date, distributes: string[]): Promise<string> => {
+export const storeApNote = async (noteURL: string, actorURL: string, createdAt: Date, distributes: string[]): Promise<string> => {
     const key = inboxKey(noteURL);
     const document: CommitDocument<any> = {
         kind: 'record',
