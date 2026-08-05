@@ -34,7 +34,7 @@ export const ensureEntitySettingsLoaded = async (ccid: string) => {
 
     try {
         const document = await concrntApi.getDocument<ApSettingsValue>(settingsKey(ccid));
-        const timelines = sanitize(document as any, ccid);
+        const timelines = sanitize(document, ccid);
         listenTimelinesByCcid.set(ccid, timelines);
         logger.info(`settingsStore: loaded ${timelines.length} listen timelines for ${ccid}`);
     } catch (error) {

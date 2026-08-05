@@ -21,7 +21,9 @@ export * from './render.ts';
 // ap/note.json (リモート投稿の参照) ならその元noteのURL、
 // ローカルメッセージなら作者のAPエンティティ経由でこのブリッジが配信するNoteのURLを返す。
 export const resolveApObjectUrl = async (ctx: Context<unknown>, targetURI: string): Promise<string | null> => {
-    const target = await concrntApi.getDocument<any>(targetURI).catch(() => null);
+    // 存在しないtargetの繰り返しlookupを抑えるため、negative cacheを5分効かせる
+    // (クラスデフォルトのnegativeCacheTTL=300はms比較のため実質無効)
+    const target = await concrntApi.getDocument<any>(targetURI, undefined, { negativeTTL: 300_000 }).catch(() => null);
     if (target == null) return null;
 
     if (target.schema === SCHEMA_AP_NOTE) {
@@ -154,7 +156,7 @@ export const buildNote = async (
 
         const targetURI = document.value?.targetURI;
         if (targetURI) {
-            const target = await concrntApi.getDocument<any>(targetURI).catch(() => null);
+            const target = await concrntApi.getDocument<any>(targetURI, undefined, { negativeTTL: 300_000 }).catch(() => null);
             if (target?.schema === SCHEMA_AP_NOTE) {
                 replyTarget = URL.parse(target.value?.noteURL);
                 replyToActorId = URL.parse(target.value?.actorURL);

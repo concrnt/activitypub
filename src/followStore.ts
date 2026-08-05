@@ -11,7 +11,6 @@
 // 対象外(公開レコード前提)。
 
 import { getLogger } from "@logtape/logtape";
-import type { SignedDocument } from "@concrnt/client";
 
 import concrntApi from "./concrnt.ts";
 import { config } from "./config.ts";
@@ -116,13 +115,10 @@ export const getLocalFollowerCcids = (actorURI: string): string[] =>
 
 interface LoadedRecord { key: string, schema: string, value: any, author: string, createdAt: string }
 
-// query APIのレスポンス封筒。@concrnt/client 2.0.1 の型定義は旧配列形式のままなので
-// クライアント更新までの間、ここで型を補う。
-interface QueryPage { items: SignedDocument[], prev: string | null, next: string | null }
-
 // nextカーソルが尽きるまでページングする。sinceは閉区間なので境界行が重複して
-// 返るため、キーで重複排除する。itemsは読取権限フィルタ後の内容なので、
-// 空ページでもnextがあれば継続する必要がある。
+// 返るため、キーで重複排除する(同一キーの更新版は後勝ち。queryAllのccfs基準
+// dedupeとは異なる挙動が必要なため自前実装)。itemsは読取権限フィルタ後の
+// 内容なので、空ページでもnextがあれば継続する必要がある。
 const queryAllByPrefix = async (prefix: string, schema: string): Promise<LoadedRecord[]> => {
     const results = new Map<string, LoadedRecord>();
     let since: string | undefined = undefined;
@@ -131,7 +127,7 @@ const queryAllByPrefix = async (prefix: string, schema: string): Promise<LoadedR
         const page = await concrntApi.query(
             { prefix, schema, limit: 100, order: 'asc', since },
             config.concrnt.domain,
-        ) as unknown as QueryPage;
+        );
 
         for (const sd of page.items) {
             const doc = JSON.parse(sd.document);

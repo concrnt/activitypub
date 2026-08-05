@@ -7,9 +7,9 @@ import { Redis } from "ioredis";
 import { db, apEntity, apKeys, apObjectReference } from './db/index.ts';
 import { importJwk } from "@fedify/fedify";
 import { eq, and } from "drizzle-orm";
-import { CDID } from '@concrnt/client'
+import { CDID, NotFoundError, type Document } from '@concrnt/client'
 
-import concrntApi, { commit, type CommitDocument } from "./concrnt.ts";
+import concrntApi, { commit } from "./concrnt.ts";
 import { config } from "./config.ts";
 import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote } from "./convert.ts";
 import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, followerKey, acceptStateKey, type ApFollowerValue } from "./schemas.ts";
@@ -24,7 +24,7 @@ export const INSTANCE_ACTOR = "instance.actor";
 
 // AP objectのURLから、ブリッジ管理下のconcrnt保存先キーを決定的に導出する
 const inboxKey = (url: string) =>
-    `cckv://${config.concrnt.ccid}/activitypub.concrnt.world/inbox/${CDID.makeHash(new TextEncoder().encode(url)).toString()}`;
+    `cckv://${config.concrnt.ccid}/activitypub.concrnt.world/inbox/${CDID.newFromStringX(url).toString()}`;
 
 // リモートアクターをフォローしているローカルエンティティのinboxタイムライン一覧
 const getFollowerDistribution = async (actorUri: string): Promise<string[]> => {
@@ -35,7 +35,7 @@ const getFollowerDistribution = async (actorUri: string): Promise<string[]> => {
 // リモートnoteを参照ドキュメント(ap/note.json)としてconcrntに保存し、保存先キーを返す
 export const storeApNote = async (noteURL: string, actorURL: string, createdAt: Date, distributes: string[]): Promise<string> => {
     const key = inboxKey(noteURL);
-    const document: CommitDocument<any> = {
+    const document: Document<any> = {
         kind: 'record',
         key,
         schema: SCHEMA_AP_NOTE,
@@ -137,7 +137,7 @@ const handleLikeActivity = async (ctx: { parseUri: (uri: URL | null) => any }, a
 
     const reaction = await extractEmojiReaction(activity);
 
-    let document: CommitDocument<any>;
+    let document: Document<any>;
     if (reaction != null) {
         document = {
             kind: 'association',
@@ -340,7 +340,7 @@ federation
 
             // 受信AnnounceはannounceのURLから決定的に導出したキーで保存しているため、
             // 参照テーブルなしで削除対象を特定できる
-            const document: CommitDocument<any> = {
+            const document: Document<any> = {
                 kind: 'delete',
                 schema: SCHEMA_DELETE,
                 value: inboxKey(object.id.href),
@@ -363,7 +363,7 @@ federation
                 return;
             }
 
-            const document: CommitDocument<any> = {
+            const document: Document<any> = {
                 kind: 'delete',
                 schema: SCHEMA_DELETE,
                 value: ref.ccUri,
@@ -472,7 +472,7 @@ federation
         const booster = await announce.getActor().catch(() => null);
         const profileOverride = await buildProfileOverride(booster);
 
-        const document: CommitDocument<any> = {
+        const document: Document<any> = {
             kind: 'record',
             key: inboxKey(announceUri),
             schema: SCHEMA_REROUTE,
@@ -555,7 +555,7 @@ federation
             return;
         }
 
-        const document: CommitDocument<any> = {
+        const document: Document<any> = {
             kind: 'delete',
             schema: SCHEMA_DELETE,
             value: inboxKey(object.id.href),
@@ -568,7 +568,9 @@ federation
         } catch (error) {
             // 保存していないnoteのDeleteは冪等に成功扱いにする
             // (throwするとfedifyが無駄にリトライし続ける)
-            if (String(error).includes("not found")) {
+            // 現行コアはcommitハンドラーでErrNotFoundを404にマップせず
+            // 500+"not found"本文で返すため、文字列判定も併用する
+            if (error instanceof NotFoundError || String(error).includes("not found")) {
                 logger.debug(`Delete for unstored object ${object.id.href}: ${error}`);
                 return;
             }
@@ -622,7 +624,8 @@ export const buildPerson = async (ctx: Context<unknown>, identifier: string): Pr
 
     const keys = await ctx.getActorKeyPairs(identifier);
 
-    const profile = await concrntApi.getDocument<any>(`cckv://${entity.ccid}/concrnt.world/profiles/main`)
+    // profile未作成entityのactor取得ごとの再フェッチを抑えるため、negative cacheを5分効かせる
+    const profile = await concrntApi.getDocument<any>(`cckv://${entity.ccid}/concrnt.world/profiles/main`, undefined, { negativeTTL: 300_000 })
         .then(doc => doc?.value ?? null)
         .catch(() => null);
 

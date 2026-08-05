@@ -5,8 +5,9 @@ import fedi, { buildPerson } from "./federation.ts";
 import { Announce, Create, Delete, Emoji, Follow, Image, isActor, Like, Note, PUBLIC_COLLECTION, Tombstone, Undo, Update } from '@fedify/vocab';
 
 import { getLogger } from "@logtape/logtape";
+import { type Document } from "@concrnt/client";
 
-import concrntApi, { commit, type CommitDocument } from "./concrnt.ts";
+import concrntApi, { commit } from "./concrnt.ts";
 import { config } from "./config.ts";
 import { buildNote, isPlainReroute, resolveApObjectUrl, SCHEMA_AP_NOTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_DELETE } from "./convert.ts";
 import { SCHEMA_AP_FOLLOW, SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, acceptStateKey, settingsKey, type ApFollowerValue, type ApAcceptStateValue } from "./schemas.ts";
@@ -294,7 +295,7 @@ const handleAssociationEvent = async (msg: CoreEvent) => {
 
     // Like対象は ap/note.json (リモート投稿の参照) でなければ連合しない。
     // 受信Announceも同じinbox名前空間にreroute記録を保存するため、スキーマで判別する。
-    const target = await concrntApi.getDocument<any>(msg.uri).catch(() => null);
+    const target = await concrntApi.getDocument<any>(msg.uri, undefined, { negativeTTL: 300_000 }).catch(() => null);
     if (target == null || target.schema !== SCHEMA_AP_NOTE || !target.value?.actorURL || !target.value?.noteURL) {
         logger.info(`Association target is not a bridgeable AP note, skipping: ${msg.uri}`);
         return;
@@ -423,7 +424,7 @@ const followActivityId = (recordKey: string) =>
     new URL(`${config.activitypub.baseUrl}/ap/follows/${encodeURIComponent(recordKey)}`);
 
 const deleteServiceRecord = async (key: string) => {
-    const document: CommitDocument<string> = {
+    const document: Document<string> = {
         kind: 'delete',
         schema: SCHEMA_DELETE,
         value: key,
