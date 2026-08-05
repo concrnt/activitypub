@@ -4,7 +4,7 @@ import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { federation } from "@fedify/hono";
 import { getLogger } from "@logtape/logtape";
-import fedi from "./federation.ts";
+import fedi, { INSTANCE_ACTOR } from "./federation.ts";
 import { db, apEntity } from "./db/index.ts"
 import { eq } from "drizzle-orm";
 import { config } from "./config.ts";
@@ -88,6 +88,9 @@ app.post("/ap/api/setup", async (c) => {
     const { id } = await c.req.json();
     if (!id) {
         return c.json({ error: "Missing 'id' in request body" }, 400);
+    }
+    if (id.toLowerCase() === INSTANCE_ACTOR) {
+        return c.json({ error: `'${INSTANCE_ACTOR}' is a reserved id` }, 400);
     }
 
     const ccid = authInfo.ccid
@@ -235,12 +238,20 @@ app.get("/ap/api/resolve", async (c) => {
     uri = decodeURIComponent(uri);
     uri = uri.replace(/^activity:\/\//, "https://");
 
-    return await ctx.lookupObject(uri, {crossOrigin: 'trust'}).then(async (obj) => {
+    // authorized fetch実装向けに、リクエストユーザー(AP未セットアップならインスタンス
+    // アクター)の鍵で署名して解決する
+    const authInfo = receiveAuthInfo(c);
+    const entity = authInfo
+        ? await db.select().from(apEntity).where(eq(apEntity.ccid, authInfo.ccid)).limit(1).then(res => res[0])
+        : undefined;
+    const documentLoader = await ctx.getDocumentLoader({ identifier: entity?.id ?? INSTANCE_ACTOR });
+
+    return await ctx.lookupObject(uri, { crossOrigin: 'trust', documentLoader }).then(async (obj) => {
         if (obj) {
             const jsonLd = await obj.toJsonLd() as Record<string, unknown>;
             // fedifyのvocabは_misskey_content等の未知プロパティをJSON-LD変換で落とすため、生JSONから拾い直す
             try {
-                const raw = await ctx.documentLoader(obj.id?.href ?? uri);
+                const raw = await documentLoader(obj.id?.href ?? uri);
                 const rawDoc = raw.document as Record<string, unknown>;
                 for (const key of Object.keys(rawDoc)) {
                     if (key.startsWith("_misskey_")) jsonLd[key] = rawDoc[key];

@@ -81,12 +81,14 @@ const buildAttachments = (
     return attachments;
 }
 
-// 本文中の @user@host をwebfingerで解決してMentionタグ+cc対象にする
-const resolveMentions = async (ctx: Context<unknown>, parts: NoteParts): Promise<{ tags: Mention[], ccs: URL[] }> => {
+// 本文中の @user@host をwebfingerで解決してMentionタグ+cc対象にする。
+// authorized fetch実装向けに、投稿者(identifier)の鍵で署名して解決する。
+const resolveMentions = async (ctx: Context<unknown>, parts: NoteParts, identifier: string): Promise<{ tags: Mention[], ccs: URL[] }> => {
     const tags: Mention[] = [];
     const ccs: URL[] = [];
+    const documentLoader = await ctx.getDocumentLoader({ identifier });
     for (const handle of parts.mentions) {
-        const actor = await ctx.lookupObject(handle).catch(() => null);
+        const actor = await ctx.lookupObject(handle, { documentLoader }).catch(() => null);
         if (actor && isActor(actor) && actor.id) {
             tags.push(new Mention({ href: actor.id, name: handle }));
             ccs.push(actor.id);
@@ -162,7 +164,7 @@ export const buildNote = async (
             }
         }
 
-        const mentions = await resolveMentions(ctx, parts);
+        const mentions = await resolveMentions(ctx, parts, values.identifier);
         const tags: (Hashtag | Emoji | Mention)[] = [...buildTags(parts), ...mentions.tags];
         const ccs: URL[] = [followersUri, ...mentions.ccs];
         if (replyToActorId) {
@@ -192,7 +194,7 @@ export const buildNote = async (
     const parts = buildNoteParts(document.value?.body ?? '', document.value?.emojis, { plaintext });
 
     const medias = document.schema === SCHEMA_MEDIA ? (document.value?.medias ?? []) : [];
-    const mentions = await resolveMentions(ctx, parts);
+    const mentions = await resolveMentions(ctx, parts, values.identifier);
 
     return new Note({
         id: noteId,

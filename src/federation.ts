@@ -1,5 +1,5 @@
 import { createFederation, exportJwk, generateCryptoKeyPair } from "@fedify/fedify";
-import { Person, Follow, Endpoints, Accept, Reject, Undo, Note, type Recipient, Create, Like, Delete, Announce, EmojiReact, Emoji, Image, Update, type Actor } from "@fedify/vocab";
+import { Person, Application, Follow, Endpoints, Accept, Reject, Undo, Note, type Recipient, Create, Like, Delete, Announce, EmojiReact, Emoji, Image, Update, type Actor } from "@fedify/vocab";
 import type { Context } from "@fedify/fedify";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
@@ -16,6 +16,11 @@ import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, followerKey, acceptStateKey
 import * as followStore from "./followStore.ts";
 
 const logger = getLogger("activitypub");
+
+// ブリッジ自身のアクター。authorized fetch環境向けに、特定ユーザーに紐づかない
+// fetch(共有インボックスの署名検証・匿名resolve)の署名主体として使う。
+// setup側でこのidの登録を拒否して予約する。
+export const INSTANCE_ACTOR = "instance.actor";
 
 // AP objectのURLから、ブリッジ管理下のconcrnt保存先キーを決定的に導出する
 const inboxKey = (url: string) =>
@@ -601,6 +606,10 @@ federation
             ` object=${activity.objectId?.href}`,
         );
     })
+    // 共有インボックス宛て配送の署名検証(鍵fetch・actor解決)をインスタンスアクターの
+    // 鍵で署名する。未設定だと無署名fetchになり、authorized fetch実装(GoToSocial等)
+    // からの配送が全て検証失敗する。個人インボックスはfedifyが受信者鍵で署名済み。
+    .setSharedKeyDispatcher(() => ({ identifier: INSTANCE_ACTOR }))
 ;
 
 
@@ -639,6 +648,21 @@ export const buildPerson = async (ctx: Context<unknown>, identifier: string): Pr
 // id・inbox・publicKey等の必須プロパティはbuildPerson内で設定している(静的解析の誤検知)
 // eslint-disable-next-line @fedify/lint/actor-id-required
 federation.setActorDispatcher("/ap/acct/{identifier}", async (ctx, identifier) => {
+    if (identifier === INSTANCE_ACTOR) {
+        const keys = await ctx.getActorKeyPairs(identifier);
+        return new Application({
+            id: ctx.getActorUri(identifier),
+            preferredUsername: identifier,
+            name: "concrnt-ap-bridge",
+            inbox: ctx.getInboxUri(identifier),
+            endpoints: new Endpoints({
+                sharedInbox: ctx.getInboxUri(),
+            }),
+            url: ctx.getActorUri(identifier),
+            publicKey: keys[0]?.cryptographicKey,
+            assertionMethods: keys.map((k) => k.multikey),
+        });
+    }
     return await buildPerson(ctx, identifier);
 }).setKeyPairsDispatcher(async (ctx, identifier) => {
 

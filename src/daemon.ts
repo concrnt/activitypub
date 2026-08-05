@@ -156,10 +156,11 @@ const handleTimelineEvent = async (entity: ApEntity, channel: string, msg: CoreE
         // メンション・リプライ相手(ccに含まれるアクター)には直接配送する。
         // フォロワーの有無に関わらず届ける必要がある。
         const followersUri = ctx.getFollowersUri(entity.id).href;
+        const documentLoader = await ctx.getDocumentLoader({ identifier: entity.id });
         const extraRecipients = (await Promise.all(
             note.ccIds
                 .filter(cc => cc.href !== PUBLIC_COLLECTION.href && cc.href !== followersUri)
-                .map(cc => ctx.lookupObject(cc.href).catch(() => null))
+                .map(cc => ctx.lookupObject(cc.href, { documentLoader }).catch(() => null))
         )).filter(isActor);
         if (extraRecipients.length > 0) {
             await ctx.sendActivity(
@@ -280,7 +281,8 @@ const handleAssociationEvent = async (msg: CoreEvent) => {
 
     const ctx = fedi.createContext(new URL(config.activitypub.baseUrl), undefined);
 
-    const actor = await ctx.lookupObject(actorURL.href);
+    const documentLoader = await ctx.getDocumentLoader({ identifier: likerEntity.id });
+    const actor = await ctx.lookupObject(actorURL.href, { documentLoader });
     if (!actor || !isActor(actor)) {
         logger.error(`Failed to fetch actor for association: ${actorURL.href}`);
         return;
@@ -365,7 +367,8 @@ const handleAssociationDeleted = async (msg: CoreEvent) => {
 
     const ctx = fedi.createContext(new URL(config.activitypub.baseUrl), undefined);
 
-    const actor = await ctx.lookupObject(actorURL);
+    const documentLoader = await ctx.getDocumentLoader({ identifier: likerId });
+    const actor = await ctx.lookupObject(actorURL, { documentLoader });
     if (!actor || !isActor(actor)) {
         logger.error(`Failed to fetch actor for undo like: ${actorURL}`);
         return;
@@ -447,7 +450,8 @@ const handleFollowRecordEvent = async (entity: ApEntity, channel: string, msg: C
         followStore.setFollowing({ ccid: entity.ccid, key: channel, actorURI });
 
         try {
-            const actor = await ctx.lookupObject(actorURI);
+            const documentLoader = await ctx.getDocumentLoader({ identifier: entity.id });
+            const actor = await ctx.lookupObject(actorURI, { documentLoader });
             if (actor == null || !isActor(actor) || actor.id == null) {
                 logger.warn(`Follow target does not resolve to an actor: ${actorURI}`);
                 followStore.removeFollowingByKey(channel);
@@ -483,7 +487,8 @@ const handleFollowRecordEvent = async (entity: ApEntity, channel: string, msg: C
         if (!ref || ref.kind !== 'follow' || ref.ccid !== entity.ccid) return;
         const actorURI = ref.actorURI;
 
-        const actor = await ctx.lookupObject(actorURI).catch(() => null);
+        const documentLoader = await ctx.getDocumentLoader({ identifier: entity.id });
+        const actor = await ctx.lookupObject(actorURI, { documentLoader }).catch(() => null);
         if (actor != null && isActor(actor)) {
             await ctx.sendActivity(
                 { identifier: entity.id },
