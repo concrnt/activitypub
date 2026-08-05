@@ -41,7 +41,7 @@ const pkg = JSON.parse(
 const ccEndpoints: Record<string, string> = {
     "net.concrnt.activitypub.info":      "/ap/api/info",
     "net.concrnt.activitypub.setup":     "/ap/api/setup",      // POST {id}
-    "net.concrnt.activitypub.settings":  "/ap/api/settings",   // GET=取得 / POST=更新
+    "net.concrnt.activitypub.settings":  "/ap/api/settings",   // GET=取得 (listenTimelines等のユーザー設定はcckvレコード側)
     "net.concrnt.activitypub.stats":     "/ap/api/stats",
     "net.concrnt.activitypub.followers": "/ap/api/followers",
     "net.concrnt.activitypub.following": "/ap/api/following",
@@ -101,14 +101,12 @@ app.post("/ap/api/setup", async (c) => {
         id: id.toLowerCase(),
         ccid: ccid,
         enabled: true,
-        listenTimelines: [],
     })
 
     return c.json({
         id: id,
         ccid: ccid,
         enabled: true,
-        listenTimelines: [],
     })
 
 });
@@ -131,33 +129,7 @@ app.get("/ap/api/settings", async (c) => {
         ccid: entity.ccid,
         id: entity.id,
         enabled: entity.enabled,
-        listenTimelines: entity.listenTimelines,
     });
-});
-
-app.post("/ap/api/settings", async (c) => {
-
-    const authInfo = receiveAuthInfo(c)
-    if (!authInfo) {
-        return c.json({ error: "Missing authentication information" }, 400);
-    }
-
-    const id = authInfo.ccid
-
-    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, id)).limit(1).then(res => res[0]);
-    if (!entity) {
-        return c.json({ error: "No ActivityPub entity found for this user" }, 404);
-    }
-
-    const { listenTimelines } = await c.req.json();
-
-    await db.update(apEntity)
-        .set({
-            listenTimelines: listenTimelines ?? entity.listenTimelines,
-        })
-        .where(eq(apEntity.ccid, id));
-
-    return c.json({ message: "Settings updated successfully" });
 });
 
 
