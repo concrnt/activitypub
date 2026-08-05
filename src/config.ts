@@ -20,6 +20,7 @@ export interface AppConfig {
   };
   activitypub: {
     baseUrl: string;
+    objectCacheTTL: number; // seconds
   };
 }
 
@@ -89,6 +90,7 @@ const readConfig = (): AppConfig => {
 
   const parsed = parse(source) as unknown;
   const root = expectRecord(parsed, "config");
+  const activitypub = root.activitypub === undefined ? {} : expectRecord(root.activitypub, "activitypub");
   const server = expectRecord(root.server, "server");
   const database = expectRecord(root.database, "database");
   const redis = expectRecord(root.redis, "redis");
@@ -120,6 +122,9 @@ const readConfig = (): AppConfig => {
     },
     activitypub: {
       baseUrl: activitypubBaseUrl,
+      objectCacheTTL: activitypub.objectCacheTTL === undefined
+        ? 30 * 24 * 60 * 60
+        : expectNumber(activitypub.objectCacheTTL, "activitypub.objectCacheTTL"),
     },
   };
 

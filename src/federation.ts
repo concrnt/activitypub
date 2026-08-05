@@ -1,5 +1,5 @@
 import { createFederation, exportJwk, generateCryptoKeyPair } from "@fedify/fedify";
-import { Person, Application, Follow, Endpoints, Accept, Reject, Undo, Note, type Recipient, Create, Like, Delete, Announce, EmojiReact, Emoji, Image, Update, type Actor } from "@fedify/vocab";
+import { Person, Application, Follow, Endpoints, Accept, Reject, Undo, Note, type Recipient, Create, Like, Delete, Announce, EmojiReact, Emoji, Image, Update, type Actor, PUBLIC_COLLECTION } from "@fedify/vocab";
 import type { Context } from "@fedify/fedify";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
@@ -14,6 +14,7 @@ import { config } from "./config.ts";
 import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote } from "./convert.ts";
 import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, followerKey, acceptStateKey, type ApFollowerValue } from "./schemas.ts";
 import * as followStore from "./followStore.ts";
+import * as objectCache from "./objectCache.ts";
 
 const logger = getLogger("activitypub");
 
@@ -418,8 +419,8 @@ federation
             return;
         }
 
-        const distribution = await getFollowerDistribution(actorUri);
-        if (distribution.length === 0) {
+        const followerCcids = followStore.getLocalFollowerCcids(actorUri);
+        if (followerCcids.length === 0) {
             logger.info(`Actor ${actorUri} has no followers. Skipping Create activity.`);
             return;
         }
@@ -431,11 +432,33 @@ federation
             return;
         }
 
+        // 本文をキャッシュする。非publicノート(Misskeyのフォロワー限定等)は
+        // リモートに再fetchできないため、閲覧許可は受信時の配送対象で固定する
+        const addressed = [...object.toIds, ...object.ccIds, ...create.toIds, ...create.ccIds].map(u => u.href);
+        const isPublic = addressed.includes(PUBLIC_COLLECTION.href);
+        const allowedCcids = isPublic ? [] : [...followerCcids];
+        if (!isPublic) {
+            for (const uri of addressed) { // DM/メンションの宛先ローカルユーザー
+                const parsedUri = ctx.parseUri(new URL(uri));
+                if (parsedUri?.type !== "actor") continue;
+                const entity = await db.select().from(apEntity)
+                    .where(eq(apEntity.id, parsedUri.identifier)).limit(1).then(res => res[0]);
+                if (entity && !allowedCcids.includes(entity.ccid)) allowedCcids.push(entity.ccid);
+            }
+        }
+        await objectCache.putObject(objectUri, {
+            json: await objectCache.buildCacheJson(object, create),
+            actorUri,
+            public: isPublic,
+            allowedCcids,
+            receivedAt: new Date().toISOString(),
+        });
+
         await storeApNote(
             objectUri,
             actorUri,
             object.published ? new Date(object.published.toString()) : new Date(),
-            distribution,
+            followerCcids.map(ccid => `cckv://${ccid}/activitypub.concrnt.world/inbox`),
         );
     })
     .on(Announce, async (ctx, announce) => {
@@ -523,9 +546,22 @@ federation
         followStore.setAcceptState(key, entity.ccid, actorURI, 'rejected');
     })
     .on(Update, async (ctx, update) => {
-        // v2はリモートコンテンツをクライアント側でライブ解決するため、
-        // サーバー側で更新すべき状態は特にない。未処理警告の抑制のため受理だけする。
         logger.debug(`Received Update activity from ${update.actorId}`);
+
+        // キャッシュ済みオブジェクトの本文だけ追従する(未キャッシュ・actor更新はスルー)
+        const object = await update.getObject();
+        if (object?.id == null) return;
+
+        // 更新者と対象オブジェクトが同一オリジンであることを確認する
+        if (update.actorId == null || new URL(update.actorId.href).host !== object.id.host) {
+            logger.warn(`Update actor/object origin mismatch: ${update.actorId} vs ${object.id}`);
+            return;
+        }
+
+        const cached = await objectCache.getObject(object.id.href);
+        if (cached == null) return;
+        cached.json = await objectCache.buildCacheJson(object, update);
+        await objectCache.putObject(object.id.href, cached);
     })
     .on(EmojiReact, async (ctx, react) => {
         await handleLikeActivity(ctx, react);
@@ -554,6 +590,8 @@ federation
             logger.debug(`Ignoring account deletion from ${del.actorId.href}`);
             return;
         }
+
+        await objectCache.deleteObject(object.id.href);
 
         const document: Document<any> = {
             kind: 'delete',

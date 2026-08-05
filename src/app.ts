@@ -5,11 +5,12 @@ import { cors } from "hono/cors";
 import { federation } from "@fedify/hono";
 import { getLogger } from "@logtape/logtape";
 import fedi, { INSTANCE_ACTOR, storeApNote } from "./federation.ts";
-import { Note } from "@fedify/vocab";
+import { Note, PUBLIC_COLLECTION } from "@fedify/vocab";
 import { db, apEntity } from "./db/index.ts"
 import { eq } from "drizzle-orm";
 import { config } from "./config.ts";
 import * as followStore from "./followStore.ts";
+import * as objectCache from "./objectCache.ts";
 
 const logger = getLogger("activitypub");
 
@@ -213,9 +214,18 @@ app.get("/ap/api/resolve", async (c) => {
     uri = decodeURIComponent(uri);
     uri = uri.replace(/^activity:\/\//, "https://");
 
+    const authInfo = receiveAuthInfo(c);
+
+    // キャッシュヒットなら即返す。非publicオブジェクトは受信時に配送対象だった
+    // ユーザーに限定し、許可がない場合はリモートfetchへフォールスルーして
+    // 可否をリモートに委ねる
+    const cached = await objectCache.getObject(uri);
+    if (cached && (cached.public || (authInfo != null && cached.allowedCcids.includes(authInfo.ccid)))) {
+        return c.json(cached.json);
+    }
+
     // authorized fetch実装向けに、リクエストユーザー(AP未セットアップならインスタンス
     // アクター)の鍵で署名して解決する
-    const authInfo = receiveAuthInfo(c);
     const entity = authInfo
         ? await db.select().from(apEntity).where(eq(apEntity.ccid, authInfo.ccid)).limit(1).then(res => res[0])
         : undefined;
@@ -233,6 +243,19 @@ app.get("/ap/api/resolve", async (c) => {
                 }
             } catch (e) {
                 logger.debug(`failed to fetch raw document for ${uri}: ${e}`);
+            }
+            // publicオブジェクトはresolve結果もキャッシュしてリモートfetchを減らす
+            const addressed = [...obj.toIds, ...obj.ccIds].map(u => u.href);
+            if (addressed.includes(PUBLIC_COLLECTION.href)) {
+                const canonical = obj.id?.href ?? uri;
+                await objectCache.putObject(canonical, {
+                    json: jsonLd,
+                    actorUri: obj.attributionId?.href ?? '',
+                    public: true,
+                    allowedCcids: [],
+                    receivedAt: new Date().toISOString(),
+                });
+                if (canonical !== uri) await objectCache.putAlias(uri, canonical);
             }
             return c.json(jsonLd);
         } else {

@@ -11,3 +11,7 @@ concrnt:
   domain: concrnt.example.com
   # ccidはprivateKeyから導出されるため設定不要
   privateKey: replace-with-your-concrnt-private-key
+
+# activitypub:
+#   # 受信ノート本文のRedisキャッシュTTL(秒)。デフォルト30日
+#   objectCacheTTL: 2592000
