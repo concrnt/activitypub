@@ -15,6 +15,7 @@ export const SCHEMA_REFERENCE = "https://schema.concrnt.net/reference.json";
 export const SCHEMA_DELETE = "https://schema.concrnt.net/delete.json";
 export const SCHEMA_LIKE = "https://schema.concrnt.world/a/like.json";
 export const SCHEMA_REACTION = "https://schema.concrnt.world/a/reaction.json";
+export const SCHEMA_MENTION = "https://schema.concrnt.world/a/mention.json";
 export const SCHEMA_AP_FOLLOW = "https://schema.concrnt.world/ap/follow.json";
 export const SCHEMA_AP_FOLLOWER = "https://schema.concrnt.world/ap/follower.json";
 export const SCHEMA_AP_ACCEPT_STATE = "https://schema.concrnt.world/ap/accept-state.json";

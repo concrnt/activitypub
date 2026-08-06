@@ -186,6 +186,8 @@ const handleOutboundCreate = async (entity: ApEntity, cckv: string, document: an
             { identifier: entity.id },
             extraRecipients,
             createActivity,
+            // ローカル同士のメンションがAPブリッジ経由で二重通知されるのを防ぐ
+            { excludeBaseUris: [baseURL] },
         );
     }
 }

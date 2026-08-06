@@ -1,17 +1,17 @@
 import { createFederation, exportJwk, generateCryptoKeyPair } from "@fedify/fedify";
-import { Person, Application, Follow, Endpoints, Accept, Reject, Undo, Note, type Recipient, Create, Like, Delete, Announce, EmojiReact, Emoji, Image, Update, type Actor } from "@fedify/vocab";
+import { Person, Application, Follow, Endpoints, Accept, Reject, Undo, Note, type Recipient, Create, Like, Delete, Announce, EmojiReact, Emoji, Image, Update, Mention, type Actor } from "@fedify/vocab";
 import type { Context } from "@fedify/fedify";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
 import { Redis } from "ioredis";
-import { db, apEntity, apKeys, apObjectReference } from './db/index.ts';
+import { db, apEntity, apKeys, apObjectReference, type ApEntity } from './db/index.ts';
 import { importJwk } from "@fedify/fedify";
 import { eq, and } from "drizzle-orm";
 import { CDID, NotFoundError, type Document } from '@concrnt/client'
 
 import concrntApi, { commit } from "./concrnt.ts";
 import { config } from "./config.ts";
-import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote } from "./convert.ts";
+import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_MENTION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote } from "./convert.ts";
 import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, followerKey, acceptStateKey, type ApFollowerValue } from "./schemas.ts";
 import * as followStore from "./followStore.ts";
 import * as objectCache from "./objectCache.ts";
@@ -419,16 +419,37 @@ federation
             return;
         }
 
-        const followerCcids = followStore.getLocalFollowerCcids(actorUri);
-        if (followerCcids.length === 0) {
-            logger.info(`Actor ${actorUri} has no followers. Skipping Create activity.`);
-            return;
-        }
-
         const object = await create.getObject();
         const objectUri = object?.id?.toString();
         if (object == null || objectUri == null) {
             logger.warn(`Received Create activity with missing or invalid object`);
+            return;
+        }
+
+        // Mentionタグとto/ccからローカルユーザー宛てのメンションを検出する
+        const addressed = [...object.toIds, ...object.ccIds, ...create.toIds, ...create.ccIds].map(u => u.href);
+        const mentionCandidates = new Set<string>(addressed);
+        try {
+            for await (const tag of object.getTags()) {
+                if (tag instanceof Mention && tag.href != null) mentionCandidates.add(tag.href.href);
+            }
+        } catch {
+            // タグ解決失敗時はto/ccから得られた情報のみで判断する
+        }
+        const mentionedEntities: ApEntity[] = [];
+        for (const href of mentionCandidates) {
+            const parsed = ctx.parseUri(new URL(href));
+            if (parsed?.type !== "actor") continue;
+            const entity = await db.select().from(apEntity)
+                .where(eq(apEntity.id, parsed.identifier)).limit(1).then(res => res[0]);
+            if (!entity || !entity.enabled) continue;
+            if (mentionedEntities.some(e => e.ccid === entity.ccid)) continue;
+            mentionedEntities.push(entity);
+        }
+
+        const followerCcids = followStore.getLocalFollowerCcids(actorUri);
+        if (followerCcids.length === 0 && mentionedEntities.length === 0) {
+            logger.info(`Actor ${actorUri} has no followers or local mentions. Skipping Create activity.`);
             return;
         }
 
@@ -439,17 +460,31 @@ federation
         await objectCache.putObject(objectUri, {
             json: await objectCache.buildCacheJson(object, create),
             actorUri,
-            addressed: [...object.toIds, ...object.ccIds, ...create.toIds, ...create.ccIds].map(u => u.href),
+            addressed,
             followersUri: actor?.followersId?.href,
             receivedAt: new Date().toISOString(),
         });
 
-        await storeApNote(
+        const noteKey = await storeApNote(
             objectUri,
             actorUri,
             object.published ? new Date(object.published.toString()) : new Date(),
             followerCcids.map(ccid => `cckv://${ccid}/activitypub.concrnt.world/inbox`),
         );
+
+        // メンションされたユーザーへはnotify-timeline宛てのassociationで通知する
+        const profileOverride = await buildProfileOverride(actor);
+        for (const entity of mentionedEntities) {
+            await commit({
+                kind: 'association',
+                author: config.concrnt.ccid,
+                schema: SCHEMA_MENTION,
+                associate: noteKey,
+                value: profileOverride ? { profileOverride } : {},
+                distributes: [`cckv://${entity.ccid}/concrnt.world/profiles/main/notify-timeline`],
+                createdAt: new Date(),
+            });
+        }
     })
     .on(Announce, async (ctx, announce) => {
         const actorUri = announce.actorId?.toString();
