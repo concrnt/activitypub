@@ -27,6 +27,8 @@ Fediverse ⇄ [Fedify federation (src/federation.ts)] ⇄ concrnt core
 | `m/reroute.json` (bodyあり) | `Create{Note}` + `quoteUrl` | 送信 |
 | `a/like.json` | `Like` | 双方向 |
 | `a/reaction.json` | `Like` + `Emoji` tag / `EmojiReact` | 双方向 |
+| `a/mention.json` | `Create{Note}` + `Mention` tag | 受信 |
+| `a/reply.json` | `Create{Note}` + `inReplyTo` (ローカル投稿宛て) | 受信 |
 | `ap/note.json` | リモート Note への軽量参照 | 受信 |
 | `delete.json` | `Delete` / `Undo` | 双方向 |
 | `p/main.json` | `Person` (name/summary/icon) + `Update` | 送信 |

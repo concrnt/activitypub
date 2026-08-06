@@ -11,7 +11,7 @@ import { CDID, NotFoundError, type Document } from '@concrnt/client'
 
 import concrntApi, { commit } from "./concrnt.ts";
 import { config } from "./config.ts";
-import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_MENTION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote } from "./convert.ts";
+import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_MENTION, SCHEMA_REPLY_ASSOCIATION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote } from "./convert.ts";
 import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, followerKey, acceptStateKey, type ApFollowerValue } from "./schemas.ts";
 import * as followStore from "./followStore.ts";
 import * as objectCache from "./objectCache.ts";
@@ -447,9 +447,25 @@ federation
             mentionedEntities.push(entity);
         }
 
+        // inReplyToがブリッジ管理下のconcrntメッセージ宛てならリプライとして扱う。
+        // それ以外(リモートnote宛てのスレッド継続等)は通常のCreateとして続行する
+        let replyTarget: { entity: ApEntity, messageUri: string } | null = null;
+        if (object.replyTargetId != null) {
+            const parsed = ctx.parseUri(object.replyTargetId);
+            if (parsed?.type === "object") {
+                const entity = await db.select().from(apEntity)
+                    .where(eq(apEntity.id, parsed.values.identifier)).limit(1).then(res => res[0]);
+                // URI中のowner(host)とentityのccidの整合を確認する(細工されたinReplyTo対策)
+                const owner = URL.parse(parsed.values.id)?.host;
+                if (entity?.enabled && owner === entity.ccid) {
+                    replyTarget = { entity, messageUri: parsed.values.id };
+                }
+            }
+        }
+
         const followerCcids = followStore.getLocalFollowerCcids(actorUri);
-        if (followerCcids.length === 0 && mentionedEntities.length === 0) {
-            logger.info(`Actor ${actorUri} has no followers or local mentions. Skipping Create activity.`);
+        if (followerCcids.length === 0 && mentionedEntities.length === 0 && replyTarget == null) {
+            logger.info(`Actor ${actorUri} has no followers, local mentions or reply target. Skipping Create activity.`);
             return;
         }
 
@@ -465,16 +481,26 @@ federation
             receivedAt: new Date().toISOString(),
         });
 
+        // フォロワーのinboxに加え、リプライ先ユーザー自身のinboxにも配送する
+        // (リプライ先がフォロワーでもある場合はSetで重複排除)
+        const noteTimelines = new Set(followerCcids.map(ccid => `cckv://${ccid}/activitypub.concrnt.world/inbox`));
+        if (replyTarget != null) {
+            noteTimelines.add(`cckv://${replyTarget.entity.ccid}/activitypub.concrnt.world/inbox`);
+        }
+
         const noteKey = await storeApNote(
             objectUri,
             actorUri,
             object.published ? new Date(object.published.toString()) : new Date(),
-            followerCcids.map(ccid => `cckv://${ccid}/activitypub.concrnt.world/inbox`),
+            [...noteTimelines],
         );
 
-        // メンションされたユーザーへはnotify-timeline宛てのassociationで通知する
+        // メンションされたユーザーへはnotify-timeline宛てのassociationで通知する。
+        // Mastodon等のリプライはリプライ先のMentionタグを必ず含むため、
+        // リプライ先本人はリプライ通知に一本化して2重通知を防ぐ
         const profileOverride = await buildProfileOverride(actor);
         for (const entity of mentionedEntities) {
+            if (replyTarget != null && entity.ccid === replyTarget.entity.ccid) continue;
             await commit({
                 kind: 'association',
                 author: config.concrnt.ccid,
@@ -484,6 +510,30 @@ federation
                 distributes: [`cckv://${entity.ccid}/concrnt.world/profiles/main/notify-timeline`],
                 createdAt: new Date(),
             });
+        }
+
+        if (replyTarget != null) {
+            const signed = await commit({
+                kind: 'association',
+                author: config.concrnt.ccid,
+                schema: SCHEMA_REPLY_ASSOCIATION,
+                associate: replyTarget.messageUri,
+                value: {
+                    targetURI: noteKey,
+                    ...(profileOverride ? { profileOverride } : {}),
+                },
+                distributes: [`cckv://${replyTarget.entity.ccid}/concrnt.world/profiles/main/notify-timeline`],
+                createdAt: new Date(),
+            });
+
+            // Delete(Note)でassociationを削除できるよう、note object id → ccfs を記録する
+            if (signed?.ccfs) {
+                await db.insert(apObjectReference).values({
+                    apObjectId: objectUri,
+                    ccUri: signed.ccfs,
+                    refType: 'inbound-reply',
+                }).onConflictDoNothing();
+            }
         }
     })
     .on(Announce, async (ctx, announce) => {
@@ -617,6 +667,31 @@ federation
         }
 
         await objectCache.deleteObject(object.id.href);
+
+        // リプライとして記録したassociationがあれば先に削除する
+        // (note本体の削除が冪等スキップされるリトライ時にも取りこぼさないよう先行)
+        const replyRef = await db.select().from(apObjectReference)
+            .where(and(
+                eq(apObjectReference.apObjectId, object.id.href),
+                eq(apObjectReference.refType, 'inbound-reply'),
+            )).limit(1).then(res => res[0]);
+        if (replyRef != null) {
+            try {
+                await commit({
+                    kind: 'delete',
+                    schema: SCHEMA_DELETE,
+                    value: replyRef.ccUri,
+                    author: config.concrnt.ccid,
+                    createdAt: new Date(),
+                });
+            } catch (error) {
+                // 既に消えているassociationは冪等に成功扱いにする
+                if (!(error instanceof NotFoundError || String(error).includes("not found"))) {
+                    throw error;
+                }
+            }
+            await db.delete(apObjectReference).where(eq(apObjectReference.apObjectId, object.id.href));
+        }
 
         const document: Document<any> = {
             kind: 'delete',
