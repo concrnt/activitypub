@@ -312,12 +312,20 @@ app.post("/ap/api/import", async (c) => {
 
     // キーは正準ID(obj.id)から導出する。決定的キーへの再commitなので冪等。
     // 配送はしない(詳細ビューから参照できれば十分。Announce内側noteと同じ扱い)。
-    const key = await storeApNote(
-        obj.id.href,
-        actorURL,
-        obj.published ? new Date(obj.published.toString()) : new Date(),
-        [],
-    );
+    // publishedがbackdate window(7日)より古い投稿を取り込めるようimport経路で実体化する
+    let key;
+    try {
+        key = await storeApNote(
+            obj.id.href,
+            actorURL,
+            obj.published ? new Date(obj.published.toString()) : new Date(),
+            [],
+            { viaImport: true },
+        );
+    } catch (e) {
+        logger.warn(`import: failed to store ${obj.id.href}: ${e}`);
+        return c.json({ error: `Failed to store note: ${e instanceof Error ? e.message : e}` }, 500);
+    }
 
     logger.info(`import: stored ${obj.id.href} as ${key} (requested by ${authInfo.ccid})`);
     return c.json({ key });

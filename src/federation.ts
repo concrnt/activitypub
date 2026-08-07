@@ -9,7 +9,7 @@ import { importJwk } from "@fedify/fedify";
 import { eq, and } from "drizzle-orm";
 import { CDID, NotFoundError, type Document } from '@concrnt/client'
 
-import concrntApi, { commit } from "./concrnt.ts";
+import concrntApi, { commit, importCommit } from "./concrnt.ts";
 import { config } from "./config.ts";
 import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_MENTION, SCHEMA_REPLY_ASSOCIATION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote } from "./convert.ts";
 import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, followerKey, acceptStateKey, type ApFollowerValue } from "./schemas.ts";
@@ -33,8 +33,10 @@ const getFollowerDistribution = async (actorUri: string): Promise<string[]> => {
         .map(ccid => `cckv://${ccid}/activitypub.concrnt.world/inbox`);
 };
 
-// リモートnoteを参照ドキュメント(ap/note.json)としてconcrntに保存し、保存先キーを返す
-export const storeApNote = async (noteURL: string, actorURL: string, createdAt: Date, distributes: string[]): Promise<string> => {
+// リモートnoteを参照ドキュメント(ap/note.json)としてconcrntに保存し、保存先キーを返す。
+// viaImport: createdAtがbackdate window(7日)より古くなりうる経路(照会・Announce内側note)用。
+// import経路は配送を行わないため、distributesが空の呼び出しでのみ使えるとする
+export const storeApNote = async (noteURL: string, actorURL: string, createdAt: Date, distributes: string[], opts?: { viaImport?: boolean }): Promise<string> => {
     const key = inboxKey(noteURL);
     const document: Document<any> = {
         kind: 'record',
@@ -48,7 +50,11 @@ export const storeApNote = async (noteURL: string, actorURL: string, createdAt: 
         createdAt,
         distributes,
     };
-    await commit(document);
+    if (opts?.viaImport) {
+        await importCommit(document);
+    } else {
+        await commit(document);
+    }
     return key;
 };
 
@@ -559,12 +565,14 @@ federation
 
         const noteActorURL = object.attributionId?.toString() ?? actorUri;
 
-        // 内側のnoteは解決できればよいのでタイムラインへは配送しない
+        // 内側のnoteは解決できればよいのでタイムラインへは配送しない。
+        // ブースト元が古いとbackdate windowに掛かるためimport経路で実体化する
         const noteKey = await storeApNote(
             noteURL,
             noteActorURL,
             object.published ? new Date(object.published.toString()) : new Date(),
             [],
+            { viaImport: true },
         );
 
         const booster = await announce.getActor().catch(() => null);
