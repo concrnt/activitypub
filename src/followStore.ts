@@ -136,7 +136,14 @@ const queryAllByPrefix = async (prefix: string, schema: string): Promise<LoadedR
             results.set(key, { key, schema: doc.schema, value: doc.value, author: doc.author, createdAt: doc.createdAt });
         }
 
-        if (page.next === null || page.next === since) break;
+        if (page.next === null) break;
+        if (page.next === since) {
+            // カーソルはcreatedAtのみなので、同一createdAtの行が1ページを超えて
+            // 並ぶとnextが同じ値のまま前進できない。この分岐に入った時点で
+            // 未取得の行が確実に残っている(nextはlimit+1行目のcreatedAt)。
+            logger.warn(`queryAllByPrefix: pagination stalled at ${page.next} for ${prefix}; loaded only ${results.size} records, results are incomplete`);
+            break;
+        }
         since = page.next;
     }
 
