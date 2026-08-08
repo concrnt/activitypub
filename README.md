@@ -49,6 +49,8 @@ pnpm prod       # 本番
 
 必要なもの: Postgres、Redis(concrnt コアと同じインスタンス)、concrnt コア。
 
+設定は環境変数 `CONFIG_PATH` で場所を指定できます(既定はリポジトリルートの `config.yaml`)。concrnt 本体と同様にディレクトリを指定することもでき、その場合は中のファイルをファイル名昇順で読み、後のファイルが前のファイルを深いマージで上書きします(秘匿値だけ `secret.yaml` に分ける、といった運用向け)。
+
 concrnt 本体のゲートウェイにサービスとして登録します (本体 config.yaml の `services:`):
 
 ```yaml

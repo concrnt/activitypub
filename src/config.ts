@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ComputeCCID, LoadKey } from "@concrnt/client";
 import { parse } from "yaml";
@@ -76,19 +77,52 @@ const expectHost = (value: unknown, path: string): string => {
   return host;
 };
 
+// concrnt本体のDeepMergeと同じ規則: マップは再帰、それ以外は後勝ちで置換、
+// srcがnull/undefinedのときは上書きしない(Goのゼロ値スキップに相当)
+const deepMerge = (dst: unknown, src: unknown): unknown => {
+  if (src === null || src === undefined) {
+    return dst;
+  }
+
+  if (isRecord(dst) && isRecord(src)) {
+    const merged: ConfigRecord = { ...dst };
+    for (const [key, value] of Object.entries(src)) {
+      merged[key] = deepMerge(merged[key], value);
+    }
+    return merged;
+  }
+
+  return src;
+};
+
 const readConfig = (): AppConfig => {
-  let source: string;
+  let parsed: unknown;
 
   try {
-    source = readFileSync(configPath, "utf8");
+    if (statSync(configPath).isDirectory()) {
+      parsed = {};
+      for (const name of readdirSync(configPath).sort()) {
+        const entryPath = join(configPath, name);
+        try {
+          if (statSync(entryPath).isDirectory()) {
+            continue;
+          }
+          parsed = deepMerge(parsed, parse(readFileSync(entryPath, "utf8")));
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          console.warn(`Skipping config file "${entryPath}": ${reason}`);
+        }
+      }
+    } else {
+      parsed = parse(readFileSync(configPath, "utf8")) as unknown;
+    }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     throw new Error(
-      `Failed to read config file at "${configPath}". Create config.yaml from config.example.yaml. ${reason}`,
+      `Failed to read config at "${configPath}". Create config.yaml from config.example.yaml, or point CONFIG_PATH at a config directory. ${reason}`,
     );
   }
 
-  const parsed = parse(source) as unknown;
   const root = expectRecord(parsed, "config");
   const activitypub = root.activitypub === undefined ? {} : expectRecord(root.activitypub, "activitypub");
   const server = expectRecord(root.server, "server");
