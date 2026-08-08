@@ -425,6 +425,62 @@ const handleAssociationDeleted = async (msg: CoreEvent) => {
 const followActivityId = (recordKey: string) =>
     new URL(`${config.activitypub.baseUrl}/ap/follows/${encodeURIComponent(recordKey)}`);
 
+// pendingのフォローへFollowアクティビティを再送する(app.tsの内部API用)。
+// v1移行はAcceptを取りこぼしたaccepted=false行をpendingのまま持ち込むため、
+// リモートでは確立済みの関係が承認待ち表示で残ることがある。重複Followには
+// Mastodon等が冪等にAcceptを返すので、再送は検証と修復を兼ねる。activity idは
+// 初回送信と同じfollowActivityId(レコードキー由来)なのでAccept突合も変わらない。
+export interface ResendFollowResult { ccid: string, actorURI: string, status: 'sent' | 'failed' | 'skipped', reason?: string }
+
+export const resendPendingFollows = async (opts: { ccid?: string, actorURIs?: string[], dryRun?: boolean }): Promise<ResendFollowResult[]> => {
+    const ctx = fedi.createContext(new URL(config.activitypub.baseUrl), undefined);
+    const wanted = opts.actorURIs?.length ? new Set(opts.actorURIs) : null;
+
+    let entities = await db.select().from(apEntity).where(eq(apEntity.enabled, true));
+    if (opts.ccid) entities = entities.filter((e) => e.ccid === opts.ccid);
+
+    const results: ResendFollowResult[] = [];
+    for (const entity of entities) {
+        await followStore.ensureEntityFollowsLoaded(entity.ccid);
+        for (const entry of followStore.getFollowing(entity.ccid)) {
+            if (wanted && !wanted.has(entry.actorURI)) continue;
+            if (entry.status !== 'pending') {
+                // 明示指定された対象がpendingでない場合だけ、その旨を報告する
+                if (wanted) results.push({ ccid: entity.ccid, actorURI: entry.actorURI, status: 'skipped', reason: `state is ${entry.status}` });
+                continue;
+            }
+            if (opts.dryRun) {
+                results.push({ ccid: entity.ccid, actorURI: entry.actorURI, status: 'skipped', reason: 'dry-run' });
+                continue;
+            }
+            try {
+                const documentLoader = await ctx.getDocumentLoader({ identifier: entity.id });
+                const actor = await ctx.lookupObject(entry.actorURI, { documentLoader });
+                if (actor == null || !isActor(actor) || actor.id == null) {
+                    results.push({ ccid: entity.ccid, actorURI: entry.actorURI, status: 'failed', reason: 'actor does not resolve' });
+                    continue;
+                }
+                await ctx.sendActivity(
+                    { identifier: entity.id },
+                    actor,
+                    new Follow({
+                        id: followActivityId(entry.key),
+                        actor: ctx.getActorUri(entity.id),
+                        object: new URL(entry.actorURI),
+                        to: new URL(entry.actorURI),
+                    }),
+                    { excludeBaseUris: [new URL(config.activitypub.baseUrl)] },
+                );
+                logger.info(`Re-sent Follow to ${entry.actorURI} for ${entity.id}`);
+                results.push({ ccid: entity.ccid, actorURI: entry.actorURI, status: 'sent' });
+            } catch (error) {
+                results.push({ ccid: entity.ccid, actorURI: entry.actorURI, status: 'failed', reason: String(error) });
+            }
+        }
+    }
+    return results;
+}
+
 const deleteServiceRecord = async (key: string) => {
     const document: Document<string> = {
         kind: 'delete',

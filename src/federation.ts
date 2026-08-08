@@ -205,6 +205,8 @@ const purgeFollower = async (actorURI: string, cause: string) => {
 const federation = createFederation({
     kv: new RedisKvStore(new Redis(config.redis.url)),
     queue: new RedisMessageQueue(() => new Redis(config.redis.url)),
+    // dev専用フラグ。本番configでは設定しないこと(SSRF防御が無効になる)
+    allowPrivateAddress: config.activitypub.allowPrivateAddress,
     // 配送失敗(リトライ毎)の観測用。LogTapeのproperties非表示問題を避けて本文に埋め込む
     onOutboxError: (error, activity) => {
         logger.warn(`Outbox delivery failure: activity=${activity?.id?.href} error=${error}`);

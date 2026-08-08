@@ -22,6 +22,7 @@ export interface AppConfig {
   activitypub: {
     baseUrl: string;
     objectCacheTTL: number; // seconds
+    allowPrivateAddress: boolean; // dev専用: ローカルのモックactorへのfetch/配送を許可する
   };
 }
 
@@ -159,6 +160,7 @@ const readConfig = (): AppConfig => {
       objectCacheTTL: activitypub.objectCacheTTL === undefined
         ? 30 * 24 * 60 * 60
         : expectNumber(activitypub.objectCacheTTL, "activitypub.objectCacheTTL"),
+      allowPrivateAddress: activitypub.allowPrivateAddress === true,
     },
   };
 
