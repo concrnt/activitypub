@@ -10,9 +10,10 @@ import { type Document } from "@concrnt/client";
 import concrntApi, { commit } from "./concrnt.ts";
 import { config } from "./config.ts";
 import { buildActivity, SCHEMA_AP_NOTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_DELETE } from "./convert.ts";
-import { SCHEMA_AP_FOLLOW, SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, acceptStateKey, settingsKey, type ApFollowerValue, type ApAcceptStateValue } from "./schemas.ts";
+import { SCHEMA_AP_FOLLOW, SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, acceptStateKey, settingsKey, type ApFollowerValue, type ApAcceptStateValue, inboxTimelineKey } from "./schemas.ts";
 import * as followStore from "./followStore.ts";
 import * as settingsStore from "./settingsStore.ts";
+import * as inboxStore from "./inboxStore.ts";
 
 interface CoreSignedDocument {
     document: string;
@@ -52,6 +53,9 @@ const refreshEntities = async () => {
         });
         await settingsStore.ensureEntitySettingsLoaded(entity.ccid).catch((error) => {
             logger.error(`Failed to load settings for ${entity.ccid}: ${error}`);
+        });
+        await inboxStore.ensureEntityInboxLoaded(entity.ccid).catch((error) => {
+            logger.error(`Failed to load inbox state for ${entity.ccid}: ${error}`);
         });
     }
 }
@@ -651,6 +655,11 @@ export const startEntityBroker = async () => {
                     await settingsStore.applyEvent(entity.ccid, msg);
                 }
 
+                // inboxタイムラインの作成/削除 → 配送先の有効/無効を即時反映
+                if (channel === inboxTimelineKey(entity.ccid)) {
+                    inboxStore.applyEvent(entity.ccid, msg);
+                }
+
                 // プロフィール更新(kv上書きでもcreatedが発火する)
                 const profileKey = `cckv://${entity.ccid}/concrnt.world/profiles/main`;
                 if (channel === profileKey && msg.type === "created") {
@@ -692,6 +701,9 @@ export const startEntityBroker = async () => {
     for (const entity of entities) {
         await settingsStore.ensureEntitySettingsLoaded(entity.ccid).catch((error) => {
             logger.error(`Failed to load settings for ${entity.ccid} (will retry on refresh): ${error}`);
+        });
+        await inboxStore.ensureEntityInboxLoaded(entity.ccid).catch((error) => {
+            logger.error(`Failed to load inbox state for ${entity.ccid} (will retry on refresh): ${error}`);
         });
     }
 }

@@ -44,6 +44,11 @@ export const acceptStateKey = (svcCcid: string, entityCcid: string, actorURI: st
 export const settingsKey = (userCcid: string) =>
     `cckv://${userCcid}/${AP_NAMESPACE}/settings`;
 
+// ブリッジがインバウンドnoteを配送する先のタイムライン。ユーザー本人がアプリ側で
+// (サービスアカウントへの書込許可policy付きで)作成する。無ければ配送しない。
+export const inboxTimelineKey = (userCcid: string) =>
+    `cckv://${userCcid}/${AP_NAMESPACE}/inbox`;
+
 export type AcceptStatus = 'accepted' | 'rejected';
 
 export interface ApFollowValue { actorURI: string }

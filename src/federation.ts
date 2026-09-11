@@ -12,8 +12,9 @@ import { CDID, NotFoundError, type Document, type SignedDocument } from '@concrn
 import concrntApi, { commit, importCommit } from "./concrnt.ts";
 import { config } from "./config.ts";
 import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_MENTION, SCHEMA_REPLY_ASSOCIATION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote, buildActivity } from "./convert.ts";
-import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, followerKey, acceptStateKey, type ApFollowerValue } from "./schemas.ts";
+import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, followerKey, acceptStateKey, inboxTimelineKey, type ApFollowerValue } from "./schemas.ts";
 import * as followStore from "./followStore.ts";
+import * as inboxStore from "./inboxStore.ts";
 import * as settingsStore from "./settingsStore.ts";
 import * as objectCache from "./objectCache.ts";
 
@@ -29,9 +30,10 @@ const inboxKey = (url: string) =>
     `cckv://${config.concrnt.ccid}/activitypub.concrnt.world/inbox/${CDID.newFromStringX(url).toString()}`;
 
 // リモートアクターをフォローしているローカルエンティティのinboxタイムライン一覧
+// (inbox未作成のフォロワーは配送先から外す)
 const getFollowerDistribution = async (actorUri: string): Promise<string[]> => {
-    return followStore.getLocalFollowerCcids(actorUri)
-        .map(ccid => `cckv://${ccid}/activitypub.concrnt.world/inbox`);
+    const ccids = await inboxStore.filterCcidsWithInbox(followStore.getLocalFollowerCcids(actorUri));
+    return ccids.map(ccid => inboxTimelineKey(ccid));
 };
 
 // リモートnoteを参照ドキュメント(ap/note.json)としてconcrntに保存し、保存先キーを返す。
@@ -472,7 +474,8 @@ federation
             }
         }
 
-        const followerCcids = followStore.getLocalFollowerCcids(actorUri);
+        // inbox未作成のフォロワーは配送先から外す(policy denyでdead-letterになるだけ)
+        const followerCcids = await inboxStore.filterCcidsWithInbox(followStore.getLocalFollowerCcids(actorUri));
         if (followerCcids.length === 0 && mentionedEntities.length === 0 && replyTarget == null) {
             logger.info(`Actor ${actorUri} has no followers, local mentions or reply target. Skipping Create activity.`);
             return;
@@ -491,10 +494,11 @@ federation
         });
 
         // フォロワーのinboxに加え、リプライ先ユーザー自身のinboxにも配送する
-        // (リプライ先がフォロワーでもある場合はSetで重複排除)
-        const noteTimelines = new Set(followerCcids.map(ccid => `cckv://${ccid}/activitypub.concrnt.world/inbox`));
-        if (replyTarget != null) {
-            noteTimelines.add(`cckv://${replyTarget.entity.ccid}/activitypub.concrnt.world/inbox`);
+        // (リプライ先がフォロワーでもある場合はSetで重複排除)。リプライ先のinboxが
+        // 無い場合はnotify-timeline宛ての通知だけになる
+        const noteTimelines = new Set(followerCcids.map(ccid => inboxTimelineKey(ccid)));
+        if (replyTarget != null && (await inboxStore.filterCcidsWithInbox([replyTarget.entity.ccid])).length > 0) {
+            noteTimelines.add(inboxTimelineKey(replyTarget.entity.ccid));
         }
 
         const noteKey = await storeApNote(
