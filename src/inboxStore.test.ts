@@ -19,7 +19,7 @@ describe('inboxStore', () => {
     });
 
     it('inboxが無い(404)ccidは配送先から外れ、結果はキャッシュされる', async () => {
-        getDocument.mockRejectedValue(new NotFoundError('not found'));
+        getDocument.mockRejectedValue(new NotFoundError('not found', inboxTimelineKey('con1none')));
         expect(await inboxStore.filterCcidsWithInbox(['con1none'])).toEqual([]);
         expect(await inboxStore.filterCcidsWithInbox(['con1none'])).toEqual([]);
         expect(getDocument).toHaveBeenCalledTimes(1);
@@ -34,7 +34,7 @@ describe('inboxStore', () => {
     });
 
     it('createdイベントで未作成→作成済みに切り替わり、deletedで戻る', async () => {
-        getDocument.mockRejectedValue(new NotFoundError('not found'));
+        getDocument.mockRejectedValue(new NotFoundError('not found', inboxTimelineKey('con1later')));
         expect(await inboxStore.filterCcidsWithInbox(['con1later'])).toEqual([]);
 
         inboxStore.applyEvent('con1later', { type: 'created' });
