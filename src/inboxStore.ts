@@ -55,8 +55,12 @@ export const filterCcidsWithInbox = async (ccids: string[]): Promise<string[]> =
     return result;
 }
 
-// inboxレコードのRedisイベントを反映する(即時反映)
-export const applyEvent = (ccid: string, msg: { type: string }) => {
+// inboxレコードのRedisイベントを反映する(即時反映)。
+// inboxタイムラインのchannelには配送済みnoteの参照作成/削除(distributes経由)の
+// イベントも同じchannelで流れてくるため、uriがinboxレコード自身のキーのものだけを
+// レコードの作成/削除として扱う(子レコードのdeletedで配送を止めない)
+export const applyEvent = (ccid: string, msg: { type: string, uri?: string }) => {
+    if (msg.uri !== inboxTimelineKey(ccid)) return;
     if (msg.type === "created") {
         inboxExistsByCcid.set(ccid, true);
         loadedCcids.add(ccid);

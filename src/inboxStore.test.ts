@@ -37,17 +37,33 @@ describe('inboxStore', () => {
         getDocument.mockRejectedValue(new NotFoundError('not found', inboxTimelineKey('con1later')));
         expect(await inboxStore.filterCcidsWithInbox(['con1later'])).toEqual([]);
 
-        inboxStore.applyEvent('con1later', { type: 'created' });
+        inboxStore.applyEvent('con1later', { type: 'created', uri: inboxTimelineKey('con1later') });
         expect(await inboxStore.filterCcidsWithInbox(['con1later'])).toEqual(['con1later']);
 
-        inboxStore.applyEvent('con1later', { type: 'deleted' });
+        inboxStore.applyEvent('con1later', { type: 'deleted', uri: inboxTimelineKey('con1later') });
         expect(await inboxStore.filterCcidsWithInbox(['con1later'])).toEqual([]);
         // イベント反映後はフェッチし直さない
         expect(getDocument).toHaveBeenCalledTimes(1);
     });
 
+    it('inbox配下の参照(配送済みnote)のdeletedイベントではinboxを削除扱いにしない', async () => {
+        getDocument.mockResolvedValue({ kind: 'record' });
+        expect(await inboxStore.filterCcidsWithInbox(['con1keep'])).toEqual(['con1keep']);
+
+        // concrntは削除されたnoteのdistributes先(inboxタイムライン)のchannelにも
+        // deletedを流す(uriは削除されたnote自身のキー)
+        inboxStore.applyEvent('con1keep', { type: 'deleted', uri: 'cckv://con1svc/activitypub.concrnt.world/inbox/xnote' });
+        expect(await inboxStore.filterCcidsWithInbox(['con1keep'])).toEqual(['con1keep']);
+
+        // 参照作成のcreatedも未作成状態を作成済みに変えない
+        getDocument.mockRejectedValue(new NotFoundError('not found', inboxTimelineKey('con1none2')));
+        expect(await inboxStore.filterCcidsWithInbox(['con1none2'])).toEqual([]);
+        inboxStore.applyEvent('con1none2', { type: 'created', uri: 'cckv://con1svc/activitypub.concrnt.world/inbox/xnote' });
+        expect(await inboxStore.filterCcidsWithInbox(['con1none2'])).toEqual([]);
+    });
+
     it('イベントが先に届いたccidはロード時にフェッチしない', async () => {
-        inboxStore.applyEvent('con1early', { type: 'created' });
+        inboxStore.applyEvent('con1early', { type: 'created', uri: inboxTimelineKey('con1early') });
         await inboxStore.ensureEntityInboxLoaded('con1early');
         expect(inboxStore.hasInbox('con1early')).toBe(true);
         expect(getDocument).not.toHaveBeenCalled();
