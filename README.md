@@ -77,3 +77,9 @@ pnpm typecheck  # tsc --noEmit
 pnpm test       # vitest
 pnpm lint       # eslint
 ```
+
+### メトリクス
+
+fedify組み込みのOpenTelemetryメトリクス(配送・inbox処理・署名検証・キュー深さ等)を`GET /metrics`でPrometheus形式で公開する(`src/metrics.ts`)。
+コアのproxyは`/ap`と`/.well-known/*`しか転送しないので外部には出ず、PodMonitorがブリッジのポートを直接scrapeする。
+Grafanaダッシュボードは`docs/dashboards/activitypub.json`(Grafana v2 Dashboardリソース形式)。

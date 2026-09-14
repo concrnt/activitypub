@@ -11,6 +11,7 @@ import { CDID, NotFoundError, type Document, type SignedDocument } from '@concrn
 
 import concrntApi, { commit, importCommit } from "./concrnt.ts";
 import { config } from "./config.ts";
+import { meterProvider } from "./metrics.ts";
 import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_MENTION, SCHEMA_REPLY_ASSOCIATION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote, buildActivity } from "./convert.ts";
 import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, followerKey, acceptStateKey, inboxTimelineKey, type ApFollowerValue } from "./schemas.ts";
 import * as followStore from "./followStore.ts";
@@ -214,6 +215,8 @@ const federation = createFederation({
     onOutboxError: (error, activity) => {
         logger.warn(`Outbox delivery failure: activity=${activity?.id?.href} error=${error}`);
     },
+    // Prometheus向けにfedify組み込みメトリクスを明示注入(src/metrics.ts)
+    meterProvider,
 });
 
 // 410 Goneを返したinboxのフォロワーは消滅済みとみなして掃除する。

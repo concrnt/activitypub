@@ -12,6 +12,7 @@ import { config } from "./config.ts";
 import * as followStore from "./followStore.ts";
 import * as objectCache from "./objectCache.ts";
 import { resendPendingFollows } from "./daemon.ts";
+import { renderPrometheus } from "./metrics.ts";
 
 const logger = getLogger("activitypub");
 
@@ -62,6 +63,12 @@ app.get("/cc-info", (c) =>
 
 // livenessProbe用ヘルスチェック
 app.get("/health", (c) => c.json({ status: "ok" }));
+
+// Prometheus scrape用(fedify組み込みメトリクス)。コアのproxyは /ap と /.well-known/* しか
+// 転送しないので公開経路には出ず、PodMonitorがpodのポートを直接叩く
+app.get("/metrics", async (c) =>
+    c.text(await renderPrometheus(), 200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" })
+);
 
 // 運用者向け内部API(prometheus流の/-/プレフィックス): pendingのフォローを一括/選択で再送する。
 // /-/配下はコアのproxy(services paths: [/ap])にも公開リバプロにも
