@@ -1,0 +1,30 @@
+[Unit]
+Description=concrnt ActivityPub bridge
+Documentation=https://github.com/concrnt/activitypub
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=concrnt-ap-bridge
+Group=concrnt-ap-bridge
+# src/migrate.ts resolves ./drizzle relative to the cwd
+WorkingDirectory=/usr/lib/concrnt-ap-bridge
+# directory of yaml files merged together (config.yaml, secret.yaml, ...)
+Environment=CONFIG_PATH=/etc/concrnt-ap-bridge
+Environment=NODE_ENV=production
+# same as docker-entrypoint.sh: migrate, then serve. A failed migration
+# (postgres not up yet) fails the unit and Restart= retries it.
+ExecStartPre=/usr/bin/node --import tsx ./src/migrate.ts
+ExecStart=/usr/bin/node --import tsx ./src/index.ts
+Restart=on-failure
+RestartSec=5
+# the bridge writes nothing to disk (keys live in postgres, queues in
+# redis); tsx keeps its transpile cache under the private /tmp
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

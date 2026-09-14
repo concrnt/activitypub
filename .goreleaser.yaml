@@ -1,0 +1,96 @@
+# GoReleaser configuration. Run by .github/workflows/release.yml on every
+# v*.*.* tag: packs the source tree + production node_modules into a tarball
+# and deb/rpm packages (no compile step: the bridge runs from TypeScript via
+# tsx, exactly like the Docker image) and attaches them to the GitHub Release.
+#
+# The packages depend on the system Node.js (>= 22, required by fedify) and
+# are architecture independent: _packaging/stage.sh builds the tree with both
+# linux builds of esbuild (the only native module, pulled in by tsx).
+#
+# local dry run (no publish):  goreleaser release --snapshot --clean
+#                              (needs goreleaser >= 2.14 for meta packages)
+version: 2
+
+project_name: concrnt-ap-bridge
+
+before:
+  hooks:
+    # builds _packaging/stage/concrnt-ap-bridge (the installed tree) and the
+    # tarball of it
+    - sh _packaging/stage.sh {{ .Version }}
+
+builds:
+  # nothing to compile
+  - skip: true
+
+nfpms:
+  # concrnt-ap-bridge_<version>_linux_all.deb / concrnt-ap-bridge_<version>_linux_all.rpm
+  - id: concrnt-ap-bridge
+    package_name: concrnt-ap-bridge
+    # no binaries: only the file tree below (Architecture: all)
+    meta: true
+    vendor: concrnt
+    homepage: https://github.com/concrnt/activitypub
+    maintainer: totegamma <github@gammalab.net>
+    description: |-
+      ActivityPub bridge for concrnt v2.
+      Runs on the system Node.js (>= 22).
+    formats: [deb, rpm]
+    dependencies:
+      - nodejs (>= 22)
+    overrides:
+      rpm:
+        dependencies:
+          - nodejs >= 22
+    contents:
+      - src: _packaging/stage/concrnt-ap-bridge/src
+        dst: /usr/lib/concrnt-ap-bridge/src
+        type: tree
+      - src: _packaging/stage/concrnt-ap-bridge/drizzle
+        dst: /usr/lib/concrnt-ap-bridge/drizzle
+        type: tree
+      - src: _packaging/stage/concrnt-ap-bridge/node_modules
+        dst: /usr/lib/concrnt-ap-bridge/node_modules
+        type: tree
+      - src: _packaging/stage/concrnt-ap-bridge/package.json
+        dst: /usr/lib/concrnt-ap-bridge/package.json
+      - src: _packaging/concrnt-ap-bridge.service
+        dst: /usr/lib/systemd/system/concrnt-ap-bridge.service
+      # the unit points CONFIG_PATH at this directory and the bridge merges
+      # every file in it, so nothing but real config may live there.
+      - src: config.example.yaml
+        dst: /etc/concrnt-ap-bridge/config.yaml
+        type: config|noreplace
+        file_info:
+          mode: 0640
+    scripts:
+      postinstall: _packaging/postinstall.sh
+      preremove: _packaging/preremove.sh
+
+checksum:
+  name_template: checksums.txt
+  extra_files:
+    - glob: _packaging/stage/*.tar.gz
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^fix ci"
+      - "^update workflow"
+
+release:
+  github:
+    owner: concrnt
+    name: activitypub
+  # releases are usually created from the GitHub UI with hand-written notes
+  # (which is what pushes the tag); keep that name/body and only add assets.
+  mode: keep-existing
+  # v0.2.0-beta1 etc. become pre-releases
+  prerelease: auto
+  # concrnt-ap-bridge_<version>.tar.gz built by _packaging/stage.sh
+  extra_files:
+    - glob: _packaging/stage/*.tar.gz

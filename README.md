@@ -70,6 +70,18 @@ services:
 
 注意: `path` は指定せず `paths` で登録してください。本体は広告されたエンドポイントに `path` を前置するため、`path: /ap` を指定すると `/ap/ap/api/...` に壊れます (このサービスは Fediverse 向けURLが `/ap` 固定のためマウント位置を変えられず、`/cc-info` は絶対パスで広告しています)。
 
+### deb / rpm でインストール
+
+GitHub Release に `v*.*.*` タグごとの deb / rpm(Architecture: all)と、同じ内容の tar.gz が添付されています(`.goreleaser.yaml`)。パッケージは Node.js **22 以上**に依存します。Debian / Ubuntu の標準リポジトリの nodejs では足りないので、[NodeSource](https://github.com/nodesource/distributions) 等で先に入れてください。
+
+```sh
+sudo apt install ./concrnt-ap-bridge_<version>_linux_all.deb   # Fedora 等: sudo dnf install ./concrnt-ap-bridge_<version>_linux_all.rpm
+sudoedit /etc/concrnt-ap-bridge/config.yaml                     # 秘匿値は同ディレクトリの secret.yaml に分けても良い
+sudo systemctl enable --now concrnt-ap-bridge
+```
+
+`/usr/lib/concrnt-ap-bridge` にソースと node_modules、`/usr/lib/systemd/system/concrnt-ap-bridge.service` にユニットが入り、起動時に `ExecStartPre` でマイグレーションを実行してからサーバーを起動します(`docker-entrypoint.sh` と同じ)。ユニットは `CONFIG_PATH=/etc/concrnt-ap-bridge` をディレクトリ指定で読むため、このディレクトリには設定ファイル以外を置かないでください。設定ファイルは `config|noreplace` なのでアップグレードで上書きされません。concrnt 本体への `services:` 登録は上記と同じです(`host` は本体から見たこのホスト)。
+
 ## 開発
 
 ```sh

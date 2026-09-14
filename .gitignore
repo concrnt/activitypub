@@ -1,3 +1,5 @@
 node_modules
 .env
 config.yaml
+dist
+_packaging/stage
