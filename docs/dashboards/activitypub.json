@@ -81,7 +81,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (activitypub_delivery_success) (rate(activitypub_delivery_sent_total{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum by (activitypub_delivery_success) (rate(activitypub_delivery_sent_total[5m]))",
                         "legendFormat": "success={{activitypub_delivery_success}}",
                         "instant": false,
                         "range": true
@@ -196,7 +196,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "topk(10, sum by (activitypub_remote_host) (rate(activitypub_delivery_sent_total{instance=~\"$instance\",activitypub_delivery_success=\"false\"}[5m])))",
+                        "expr": "topk(10, sum by (activitypub_remote_host) (rate(activitypub_delivery_sent_total{activitypub_delivery_success=\"false\"}[5m])))",
                         "legendFormat": "{{activitypub_remote_host}}",
                         "instant": false,
                         "range": true
@@ -311,7 +311,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (activitypub_remote_host, http_response_status_code) (rate(activitypub_delivery_permanent_failure_total{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum by (activitypub_remote_host, http_response_status_code) (rate(activitypub_delivery_permanent_failure_total[5m]))",
                         "legendFormat": "{{activitypub_remote_host}} {{http_response_status_code}}",
                         "instant": false,
                         "range": true
@@ -426,7 +426,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "histogram_quantile(0.95, sum by (le) (rate(activitypub_delivery_duration_bucket{instance=~\"$instance\"}[5m])))",
+                        "expr": "histogram_quantile(0.95, sum by (le) (rate(activitypub_delivery_duration_bucket[5m])))",
                         "legendFormat": "p95",
                         "instant": false,
                         "range": true
@@ -541,7 +541,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "histogram_quantile(0.95, sum by (le) (rate(activitypub_fanout_recipients_bucket{instance=~\"$instance\"}[5m])))",
+                        "expr": "histogram_quantile(0.95, sum by (le) (rate(activitypub_fanout_recipients_bucket[5m])))",
                         "legendFormat": "p95",
                         "instant": false,
                         "range": true
@@ -656,7 +656,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "label_replace(sum by (activitypub_activity_type, activitypub_processing_result) (rate(activitypub_outbox_activity_total{instance=~\"$instance\"}[5m])), \"type\", \"$1\", \"activitypub_activity_type\", \".*#(.*)\")",
+                        "expr": "label_replace(sum by (activitypub_activity_type, activitypub_processing_result) (rate(activitypub_outbox_activity_total[5m])), \"type\", \"$1\", \"activitypub_activity_type\", \".*#(.*)\")",
                         "legendFormat": "{{type}} {{activitypub_processing_result}}",
                         "instant": false,
                         "range": true
@@ -771,7 +771,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "label_replace(sum by (activitypub_activity_type, activitypub_processing_result) (rate(activitypub_inbox_activity_total{instance=~\"$instance\"}[5m])), \"type\", \"$1\", \"activitypub_activity_type\", \".*#(.*)\")",
+                        "expr": "label_replace(sum by (activitypub_activity_type, activitypub_processing_result) (rate(activitypub_inbox_activity_total[5m])), \"type\", \"$1\", \"activitypub_activity_type\", \".*#(.*)\")",
                         "legendFormat": "{{type}} {{activitypub_processing_result}}",
                         "instant": false,
                         "range": true
@@ -886,7 +886,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "label_replace(histogram_quantile(0.95, sum by (le, activitypub_activity_type) (rate(activitypub_inbox_processing_duration_bucket{instance=~\"$instance\"}[5m]))), \"type\", \"$1\", \"activitypub_activity_type\", \".*#(.*)\")",
+                        "expr": "label_replace(histogram_quantile(0.95, sum by (le, activitypub_activity_type) (rate(activitypub_inbox_processing_duration_bucket[5m]))), \"type\", \"$1\", \"activitypub_activity_type\", \".*#(.*)\")",
                         "legendFormat": "{{type}}",
                         "instant": false,
                         "range": true
@@ -1001,7 +1001,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (activitypub_verification_failure_reason) (rate(activitypub_signature_verification_failure_total{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum by (activitypub_verification_failure_reason) (rate(activitypub_signature_verification_failure_total[5m]))",
                         "legendFormat": "{{activitypub_verification_failure_reason}}",
                         "instant": false,
                         "range": true
@@ -1116,7 +1116,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (activitypub_signature_kind, activitypub_signature_result) (rate(activitypub_signature_verification_duration_count{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum by (activitypub_signature_kind, activitypub_signature_result) (rate(activitypub_signature_verification_duration_count[5m]))",
                         "legendFormat": "{{activitypub_signature_kind}} {{activitypub_signature_result}}",
                         "instant": false,
                         "range": true
@@ -1231,7 +1231,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (activitypub_signature_key_fetch_result) (rate(activitypub_signature_key_fetch_duration_count{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum by (activitypub_signature_key_fetch_result) (rate(activitypub_signature_key_fetch_duration_count[5m]))",
                         "legendFormat": "{{activitypub_signature_key_fetch_result}}",
                         "instant": false,
                         "range": true
@@ -1346,7 +1346,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "histogram_quantile(0.95, sum by (le, activitypub_signature_key_fetch_result) (rate(activitypub_signature_key_fetch_duration_bucket{instance=~\"$instance\"}[5m])))",
+                        "expr": "histogram_quantile(0.95, sum by (le, activitypub_signature_key_fetch_result) (rate(activitypub_signature_key_fetch_duration_bucket[5m])))",
                         "legendFormat": "{{activitypub_signature_key_fetch_result}}",
                         "instant": false,
                         "range": true
@@ -1461,7 +1461,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "max(fedify_queue_depth{fedify_queue_depth_state=\"queued\",instance=~\"$instance\"})",
+                        "expr": "max(fedify_queue_depth{fedify_queue_depth_state=\"queued\"})",
                         "legendFormat": "queued",
                         "instant": false,
                         "range": true
@@ -1544,7 +1544,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "max by (fedify_queue_depth_state) (fedify_queue_depth{instance=~\"$instance\"})",
+                        "expr": "max by (fedify_queue_depth_state) (fedify_queue_depth)",
                         "legendFormat": "{{fedify_queue_depth_state}}",
                         "instant": false,
                         "range": true
@@ -1659,7 +1659,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (fedify_queue_role) (fedify_queue_task_in_flight{instance=~\"$instance\"})",
+                        "expr": "sum by (fedify_queue_role) (fedify_queue_task_in_flight)",
                         "legendFormat": "{{fedify_queue_role}}",
                         "instant": false,
                         "range": true
@@ -1774,7 +1774,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (fedify_queue_role, fedify_queue_task_result) (rate(fedify_queue_task_completed_total{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum by (fedify_queue_role, fedify_queue_task_result) (rate(fedify_queue_task_completed_total[5m]))",
                         "legendFormat": "{{fedify_queue_role}} {{fedify_queue_task_result}}",
                         "instant": false,
                         "range": true
@@ -1796,7 +1796,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (fedify_queue_role, fedify_queue_task_result) (rate(fedify_queue_task_failed_total{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum by (fedify_queue_role, fedify_queue_task_result) (rate(fedify_queue_task_failed_total[5m]))",
                         "legendFormat": "{{fedify_queue_role}} {{fedify_queue_task_result}}",
                         "instant": false,
                         "range": true
@@ -1911,7 +1911,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "histogram_quantile(0.95, sum by (le, fedify_queue_role) (rate(fedify_queue_task_duration_bucket{instance=~\"$instance\"}[5m])))",
+                        "expr": "histogram_quantile(0.95, sum by (le, fedify_queue_role) (rate(fedify_queue_task_duration_bucket[5m])))",
                         "legendFormat": "{{fedify_queue_role}}",
                         "instant": false,
                         "range": true
@@ -2026,7 +2026,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (activitypub_lookup_result) (rate(activitypub_key_lookup_total{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum by (activitypub_lookup_result) (rate(activitypub_key_lookup_total[5m]))",
                         "legendFormat": "{{activitypub_lookup_result}}",
                         "instant": false,
                         "range": true
@@ -2141,7 +2141,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (activitypub_lookup_result) (rate(activitypub_document_fetch_total{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum by (activitypub_lookup_result) (rate(activitypub_document_fetch_total[5m]))",
                         "legendFormat": "{{activitypub_lookup_result}}",
                         "instant": false,
                         "range": true
@@ -2256,7 +2256,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "topk(10, histogram_quantile(0.95, sum by (le, activitypub_remote_host) (rate(activitypub_document_fetch_duration_bucket{instance=~\"$instance\"}[5m]))))",
+                        "expr": "topk(10, histogram_quantile(0.95, sum by (le, activitypub_remote_host) (rate(activitypub_document_fetch_duration_bucket[5m]))))",
                         "legendFormat": "{{activitypub_remote_host}}",
                         "instant": false,
                         "range": true
@@ -2371,7 +2371,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum(rate(activitypub_document_cache_total{instance=~\"$instance\",activitypub_lookup_result=\"hit\"}[5m])) / sum(rate(activitypub_document_cache_total{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum(rate(activitypub_document_cache_total{activitypub_lookup_result=\"hit\"}[5m])) / sum(rate(activitypub_document_cache_total[5m]))",
                         "legendFormat": "hit rate",
                         "instant": false,
                         "range": true
@@ -2486,7 +2486,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (webfinger_handle_result) (rate(webfinger_handle_total{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum by (webfinger_handle_result) (rate(webfinger_handle_total[5m]))",
                         "legendFormat": "{{webfinger_handle_result}}",
                         "instant": false,
                         "range": true
@@ -2601,7 +2601,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (activitypub_collection_kind, activitypub_collection_result) (rate(activitypub_collection_request_total{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum by (activitypub_collection_kind, activitypub_collection_result) (rate(activitypub_collection_request_total[5m]))",
                         "legendFormat": "{{activitypub_collection_kind}} {{activitypub_collection_result}}",
                         "instant": false,
                         "range": true
@@ -2716,7 +2716,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "sum by (fedify_endpoint, http_response_status_code) (rate(fedify_http_server_request_count_total{instance=~\"$instance\"}[5m]))",
+                        "expr": "sum by (fedify_endpoint, http_response_status_code) (rate(fedify_http_server_request_count_total[5m]))",
                         "legendFormat": "{{fedify_endpoint}} {{http_response_status_code}}",
                         "instant": false,
                         "range": true
@@ -2831,7 +2831,7 @@
                       },
                       "spec": {
                         "editorMode": "code",
-                        "expr": "histogram_quantile(0.95, sum by (le, fedify_endpoint) (rate(fedify_http_server_request_duration_bucket{instance=~\"$instance\"}[5m])))",
+                        "expr": "histogram_quantile(0.95, sum by (le, fedify_endpoint) (rate(fedify_http_server_request_duration_bucket[5m])))",
                         "legendFormat": "{{fedify_endpoint}}",
                         "instant": false,
                         "range": true
@@ -3342,40 +3342,6 @@
           "label": "Prometheus",
           "hide": "dontHide",
           "skipUrlSync": false,
-          "allowCustomValue": true
-        }
-      },
-      {
-        "kind": "QueryVariable",
-        "spec": {
-          "name": "instance",
-          "current": {
-            "text": "",
-            "value": ""
-          },
-          "label": "instance",
-          "hide": "dontHide",
-          "refresh": "onDashboardLoad",
-          "skipUrlSync": false,
-          "query": {
-            "kind": "DataQuery",
-            "group": "prometheus",
-            "version": "v0",
-            "datasource": {
-              "name": "prometheus"
-            },
-            "spec": {
-              "qryType": 1,
-              "query": "label_values(fedify_queue_depth,instance)",
-              "refId": "PrometheusVariableQueryEditor-VariableQuery"
-            }
-          },
-          "regex": "",
-          "sort": "disabled",
-          "definition": "label_values(fedify_queue_depth,instance)",
-          "options": [],
-          "multi": true,
-          "includeAll": false,
           "allowCustomValue": true
         }
       }
