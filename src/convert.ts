@@ -3,7 +3,8 @@ import type { Context } from "@fedify/fedify";
 import { Temporal } from "@js-temporal/polyfill";
 import { eq } from "drizzle-orm";
 import { db, apEntity } from './db/index.ts';
-import concrntApi from "./concrnt.ts";
+import { NotFoundError, PermissionError } from "@concrnt/client";
+import concrntApi, { resolveAsProxy } from "./concrnt.ts";
 import { config } from "./config.ts";
 import { buildNoteParts, type NoteParts } from './render.ts';
 import {
@@ -100,12 +101,46 @@ const resolveMentions = async (ctx: Context<unknown>, parts: NoteParts, identifi
     return { tags, ccs };
 }
 
+// 送信側の公開範囲。匿名で読める → public、匿名では読めないがapProxy(サービス
+// アカウント)には読める → フォロワー限定、どちらでもない → 連合しない(null)
+export type Visibility = 'public' | 'followers';
+
+// embeddedIsPublic: Redisイベント同梱ドキュメントのisPublic(サーバーの匿名可読判定)。
+// falseはサーバー自身の確定判定なので匿名fetchで再確認しない。undefined(pull経路・
+// 旧サーバー)は匿名fetchで判定する。policy判定なのでキャッシュ(正/負とも)は見ない。
+// 拒否と不在はどちらも404(debug時は403)で区別できないが、いずれも「読めない」でよい
+export const resolveVisibility = async (uri: string, embeddedIsPublic?: boolean): Promise<Visibility | null> => {
+    if (embeddedIsPublic === true) return 'public';
+    if (embeddedIsPublic === undefined) {
+        try {
+            await concrntApi.getDocument(uri, undefined, { cache: 'no-cache' });
+            return 'public';
+        } catch (e) {
+            if (!(e instanceof NotFoundError) && !(e instanceof PermissionError)) throw e;
+        }
+    }
+    try {
+        await resolveAsProxy(uri);
+        return 'followers';
+    } catch (e) {
+        if (e instanceof NotFoundError || e instanceof PermissionError) return null;
+        throw e;
+    }
+};
+
+// 公開: to=Public, cc=followers+宛先 / フォロワー限定: to=followers, cc=宛先のみ
+export const audience = (visibility: Visibility, followersUri: URL, extra: URL[]): { tos: URL[], ccs: URL[] } =>
+    visibility === 'public'
+        ? { tos: [PUBLIC_COLLECTION], ccs: [followersUri, ...extra] }
+        : { tos: [followersUri], ccs: extra };
+
 // concrntメッセージドキュメントをAP Noteへ変換する。
 // Noteとして表現できないドキュメント(テキストなしreroute等)はnull。
 export const buildNote = async (
     ctx: Context<unknown>,
     values: { identifier: string, id: string },
     document: any,
+    visibility: Visibility,
 ): Promise<Note | null> => {
     const noteId = ctx.getObjectUri(Note, values);
     const actorUri = ctx.getActorUri(values.identifier);
@@ -135,8 +170,7 @@ export const buildNote = async (
         return new Note({
             id: noteId,
             attribution: actorUri,
-            tos: [PUBLIC_COLLECTION],
-            ccs: [followersUri],
+            ...audience(visibility, followersUri, []),
             content,
             summary: parts.summary,
             sensitive: parts.sensitive,
@@ -169,17 +203,16 @@ export const buildNote = async (
 
         const mentions = await resolveMentions(ctx, parts, values.identifier);
         const tags: (Hashtag | Emoji | Mention)[] = [...buildTags(parts), ...mentions.tags];
-        const ccs: URL[] = [followersUri, ...mentions.ccs];
+        const extra: URL[] = [...mentions.ccs];
         if (replyToActorId) {
             tags.push(new Mention({ href: replyToActorId, name: replyToActorId.href }));
-            ccs.push(replyToActorId);
+            extra.push(replyToActorId);
         }
 
         return new Note({
             id: noteId,
             attribution: actorUri,
-            tos: [PUBLIC_COLLECTION],
-            ccs,
+            ...audience(visibility, followersUri, extra),
             content: parts.contentHtml,
             summary: parts.summary,
             sensitive: parts.sensitive,
@@ -202,8 +235,7 @@ export const buildNote = async (
     return new Note({
         id: noteId,
         attribution: actorUri,
-        tos: [PUBLIC_COLLECTION],
-        ccs: [followersUri, ...mentions.ccs],
+        ...audience(visibility, followersUri, mentions.ccs),
         content: parts.contentHtml,
         summary: parts.summary,
         sensitive: parts.sensitive,
@@ -223,6 +255,7 @@ export const buildActivity = async (
     ctx: Context<unknown>,
     values: { identifier: string, id: string },
     document: any,
+    visibility: Visibility,
 ): Promise<Announce | Create | null> => {
     if (isPlainReroute(document)) {
         const targetURI: string | undefined = document.value?.targetURI;
@@ -235,12 +268,11 @@ export const buildActivity = async (
             id: new URL(`${config.activitypub.baseUrl}/ap/announces/${encodeURIComponent(values.id)}`),
             actor: ctx.getActorUri(values.identifier),
             object: new URL(objectRef),
-            tos: [PUBLIC_COLLECTION],
-            ccs: [ctx.getFollowersUri(values.identifier)],
+            ...audience(visibility, ctx.getFollowersUri(values.identifier), []),
         });
     }
 
-    const note = await buildNote(ctx, values, document);
+    const note = await buildNote(ctx, values, document, visibility);
     if (note == null) return null;
 
     return new Create({

@@ -9,7 +9,7 @@ import { type Document } from "@concrnt/client";
 
 import concrntApi, { commit } from "./concrnt.ts";
 import { config } from "./config.ts";
-import { buildActivity, SCHEMA_AP_NOTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_DELETE } from "./convert.ts";
+import { buildActivity, resolveVisibility, type Visibility, SCHEMA_AP_NOTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_DELETE } from "./convert.ts";
 import { SCHEMA_AP_FOLLOW, SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, acceptStateKey, settingsKey, type ApFollowerValue, type ApAcceptStateValue, inboxTimelineKey } from "./schemas.ts";
 import * as followStore from "./followStore.ts";
 import * as settingsStore from "./settingsStore.ts";
@@ -18,6 +18,8 @@ import * as inboxStore from "./inboxStore.ts";
 interface CoreSignedDocument {
     document: string;
     references?: Record<string, CoreSignedDocument>;
+    // サーバー内部ビューの注釈: 匿名要求者が読めるか(未評価=undefinedは非公開扱い)
+    isPublic?: boolean;
 }
 
 // concrntコアがpubsubへ流すイベント
@@ -95,7 +97,15 @@ const handleOwnRecordEvent = async (entity: ApEntity, channel: string, msg: Core
         const distributes: string[] = Array.isArray(document.distributes) ? document.distributes : [];
         if (!distributes.some(dest => prefixes.some(prefix => dest.startsWith(prefix)))) return;
 
-        await handleOutboundCreate(entity, document.key ?? channel, document);
+        // Redisイベントはサーバー内部ビューで非公開文書も載るため、匿名/apProxyの
+        // 可読性で公開範囲を決め、どちらにも読めないものは連合しない
+        const visibility = await resolveVisibility(channel, eventSD?.isPublic);
+        if (visibility == null) {
+            logger.info(`Not readable by the bridge account, not federating: ${channel}`);
+            return;
+        }
+
+        await handleOutboundCreate(entity, document.key ?? channel, document, visibility);
 
     } else if (msg.type === "deleted") {
         // deletedは配布先チャンネルにも流れるため、レコード自身のチャンネルのイベントのみ処理
@@ -104,13 +114,13 @@ const handleOwnRecordEvent = async (entity: ApEntity, channel: string, msg: Core
     }
 }
 
-const handleOutboundCreate = async (entity: ApEntity, cckv: string, document: any) => {
+const handleOutboundCreate = async (entity: ApEntity, cckv: string, document: any, visibility: Visibility) => {
 
     const baseURL = new URL(config.activitypub.baseUrl);
     const ctx = fedi.createContext(baseURL, undefined);
 
     // 手元のdocumentから直接アクティビティを構築する(自己HTTP経由の再取得を避ける)。
-    const activity = await buildActivity(ctx, { identifier: entity.id, id: cckv }, document);
+    const activity = await buildActivity(ctx, { identifier: entity.id, id: cckv }, document, visibility);
     if (activity == null) {
         logger.info(`Document does not resolve to an AP activity, skipping: ${cckv}`);
         return;
@@ -122,25 +132,30 @@ const handleOutboundCreate = async (entity: ApEntity, cckv: string, document: an
         activity,
     );
 
+    // 同一キー上書き(createdの再発火)で公開範囲が変わりうるので、削除時の宛先が
+    // 最新の判定に従うようmetaは常に更新する
     if (activity instanceof Announce) {
         // unboost時にUndo(Announce)を送るための対応を記録
+        const meta = { object: activity.objectId!.href, visibility };
         await db.insert(apObjectReference).values({
             apObjectId: activity.id!.href,
             ccUri: cckv,
             refType: 'outbound-announce',
-            meta: { object: activity.objectId!.href },
-        }).onConflictDoNothing();
+            meta,
+        }).onConflictDoUpdate({ target: apObjectReference.apObjectId, set: { meta } });
 
         return;
     }
 
     // deletedイベントはdistributesを運ばず監視設定と突合できないため、
     // 送信済みNoteを記録しておき、削除時はこの対応表で判定する
+    const meta = { visibility };
     await db.insert(apObjectReference).values({
         apObjectId: ctx.getObjectUri(Note, { identifier: entity.id, id: cckv }).href,
         ccUri: cckv,
         refType: 'outbound-note',
-    }).onConflictDoNothing();
+        meta,
+    }).onConflictDoUpdate({ target: apObjectReference.apObjectId, set: { meta } });
 
     // メンション・リプライ相手(ccに含まれるアクター)には直接配送する。
     // フォロワーの有無に関わらず届ける必要がある。
@@ -165,6 +180,9 @@ const handleOutboundCreate = async (entity: ApEntity, cckv: string, document: an
 const handleOutboundDelete = async (entity: ApEntity, cckv: string) => {
 
     const ctx = fedi.createContext(new URL(config.activitypub.baseUrl), undefined);
+    // フォロワー限定で送ったものの取り消しはPublic宛てにしない。meta無し(記録開始前の
+    // 行・救済ヒューリスティック経路)は従来どおりPublic
+    const followersUri = ctx.getFollowersUri(entity.id);
 
     const refs = await db.select().from(apObjectReference)
         .where(eq(apObjectReference.ccUri, cckv));
@@ -184,7 +202,7 @@ const handleOutboundDelete = async (entity: ApEntity, cckv: string) => {
                     actor: ctx.getActorUri(entity.id),
                     object: announceRef.meta?.object ? new URL(announceRef.meta.object) : null,
                 }),
-                tos: [PUBLIC_COLLECTION],
+                tos: announceRef.meta?.visibility === 'followers' ? [followersUri] : [PUBLIC_COLLECTION],
             }),
         );
         await db.delete(apObjectReference).where(eq(apObjectReference.apObjectId, announceRef.apObjectId));
@@ -208,7 +226,7 @@ const handleOutboundDelete = async (entity: ApEntity, cckv: string) => {
             id: new URL(`#delete-${Date.now()}`, noteURL),
             actor: ctx.getActorUri(entity.id),
             object: new Tombstone({ id: noteURL }),
-            tos: [PUBLIC_COLLECTION],
+            tos: noteRef?.meta?.visibility === 'followers' ? [followersUri] : [PUBLIC_COLLECTION],
         })
     );
 

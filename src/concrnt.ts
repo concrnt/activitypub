@@ -1,4 +1,4 @@
-import { Api, InMemoryAuthProvider, InMemoryKVS, type Document, type SignedDocument } from '@concrnt/client'
+import { Api, InMemoryAuthProvider, InMemoryKVS, renderUriTemplate, type Document, type SignedDocument } from '@concrnt/client'
 import { config } from "./config.ts";
 
 const authProvider = new InMemoryAuthProvider(config.concrnt.privateKey);
@@ -25,6 +25,24 @@ export const importCommit = async <T>(document: Document<T>): Promise<void> => {
     if (results.length > 0) {
         throw new Error(`import failed: ${results[0].error}`);
     }
+};
+
+// apProxy(サービスアカウント)として読めるかの判定用。getDocumentはsubkeyがないため
+// 常に匿名fetchになるので、マスター鍵JWTでresolveを直接叩く。policy判定なので
+// キャッシュしない。404→NotFoundError、403(debug時)→PermissionErrorはそのまま投げる
+export const resolveAsProxy = async <T>(uri: string): Promise<Document<T>> => {
+    const parsed = URL.parse(uri);
+    if (!parsed) throw new Error(`invalid URI: ${uri}`);
+    const server = await api.getServer(config.concrnt.domain);
+    const path = renderUriTemplate(server, 'net.concrnt.core.resolve', {
+        uri,
+        owner: parsed.host,
+        key: parsed.pathname.replace(/^\/+|\/+$/g, ''),
+    });
+    // initはheadersが書き換えられるため毎回新規に渡す
+    const sd = await api.fetchWithCredential<SignedDocument>(
+        config.concrnt.domain, path, {}, undefined, { useMasterkey: true });
+    return JSON.parse(sd.document);
 };
 
 export default api;

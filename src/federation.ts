@@ -7,12 +7,12 @@ import { Redis } from "ioredis";
 import { db, apEntity, apKeys, apObjectReference, type ApEntity } from './db/index.ts';
 import { importJwk } from "@fedify/fedify";
 import { eq, and } from "drizzle-orm";
-import { CDID, NotFoundError, type Document, type SignedDocument } from '@concrnt/client'
+import { CDID, NotFoundError, PermissionError, type Document, type SignedDocument } from '@concrnt/client'
 
-import concrntApi, { commit, importCommit } from "./concrnt.ts";
+import concrntApi, { commit, importCommit, resolveAsProxy } from "./concrnt.ts";
 import { config } from "./config.ts";
 import { meterProvider } from "./metrics.ts";
-import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_MENTION, SCHEMA_REPLY_ASSOCIATION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote, buildActivity } from "./convert.ts";
+import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_MENTION, SCHEMA_REPLY_ASSOCIATION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote, buildActivity, type Visibility } from "./convert.ts";
 import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, followerKey, acceptStateKey, inboxTimelineKey, type ApFollowerValue } from "./schemas.ts";
 import * as followStore from "./followStore.ts";
 import * as inboxStore from "./inboxStore.ts";
@@ -961,7 +961,8 @@ federation.setOutboxDispatcher(
                 if (document.author !== entity.ccid || document.kind !== 'record') continue;
                 if (document.schema === SCHEMA_REFERENCE) continue;
 
-                const activity = await buildActivity(ctx, { identifier, id: document.key ?? ref.href }, document)
+                // 一覧は匿名fetchなので、ここまで来た投稿は公開段で確定
+                const activity = await buildActivity(ctx, { identifier, id: document.key ?? ref.href }, document, 'public')
                     .catch(() => null);
                 if (activity == null) continue; // Note化不能・Announce先解決不能
                 activities.push(activity);
@@ -1041,9 +1042,32 @@ federation.setObjectDispatcher(
             return null;
         }
 
-        const document = await concrntApi.getDocument<any>(values.id)
+        // 匿名で読めれば公開。読めなければapProxyで読めるか試し、フォロワー限定として
+        // 署名済みリクエストの主体が現在のフォロワーか宛先(cc)のときだけ返す。
+        // policy判定なのでキャッシュは見ない。無署名の要求には認証付きresolveを走らせない
+        let document: any;
+        let visibility: Visibility = 'public';
+        try {
+            document = await concrntApi.getDocument<any>(values.id, undefined, { cache: 'no-cache' });
+        } catch (e) {
+            if (!(e instanceof NotFoundError) && !(e instanceof PermissionError)) throw e;
+            const requester = (await ctx.getSignedKeyOwner())?.id?.href;
+            if (!requester) return null;
+            try {
+                document = await resolveAsProxy<any>(values.id);
+            } catch (e2) {
+                if (e2 instanceof NotFoundError || e2 instanceof PermissionError) return null;
+                throw e2;
+            }
+            visibility = 'followers';
+            const note = await buildNote(ctx, values, document, visibility);
+            if (note == null) return null;
+            const allowed = followStore.getFollowers(entity[0].ccid).some(f => f.actorURI === requester)
+                || note.ccIds.some(cc => cc.href === requester);
+            return allowed ? note : null;
+        }
 
-        return await buildNote(ctx, values, document);
+        return await buildNote(ctx, values, document, visibility);
     },
 );
 
