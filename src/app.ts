@@ -4,7 +4,7 @@ import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { federation } from "@fedify/hono";
 import { getLogger } from "@logtape/logtape";
-import fedi, { INSTANCE_ACTOR, storeApNote } from "./federation.ts";
+import fedi, { INSTANCE_ACTOR, storeApNote, removeFollowerEntry, rejectFollower } from "./federation.ts";
 import { Note, PUBLIC_COLLECTION } from "@fedify/vocab";
 import { db, apEntity } from "./db/index.ts"
 import { eq } from "drizzle-orm";
@@ -48,9 +48,11 @@ const ccEndpoints: Record<string, string> = {
     "net.concrnt.activitypub.settings":  "/ap/api/settings",   // GET=取得 (listenTimelines等のユーザー設定はcckvレコード側)
     "net.concrnt.activitypub.stats":     "/ap/api/stats",
     "net.concrnt.activitypub.followers": "/ap/api/followers",
+    "net.concrnt.activitypub.removeFollower": "/ap/api/followers?uri={uri}", // DELETE
     "net.concrnt.activitypub.following": "/ap/api/following",
     "net.concrnt.activitypub.resolve":   "/ap/api/resolve?uri={uri}",
     "net.concrnt.activitypub.import":    "/ap/api/import",     // POST {uri}
+    "net.concrnt.activitypub.lookup":    "/ap/api/lookup?ccid={ccid}&uri={uri}",
 };
 
 // 以下2つは定期ポーリングされるため、fedifyミドルウェアより前に登録して
@@ -98,6 +100,38 @@ app.get("/ap/api/info", async (c) => {
     };
 
     return c.json(serverInfo);
+});
+
+
+// ccid→APアクター/Note URLの公開lookup。relay等の外部サービスが、ネイティブ投稿(cckv)を
+// Announceするときの対象URLを得るために使う(URLの組み立て規則をブリッジ側に閉じ込める)。
+// 返すのはWebFinger/actor取得で既に公開されている情報だけなので認証不要
+app.get("/ap/api/lookup", async (c) => {
+    const ccid = c.req.query("ccid")?.trim();
+    const uri = c.req.query("uri")?.trim();
+    if (!ccid) {
+        return c.json({ error: "Missing 'ccid' query parameter" }, 400);
+    }
+
+    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, ccid)).limit(1).then(res => res[0]);
+    if (!entity || !entity.enabled) {
+        return c.json({ error: "No ActivityPub entity found for this ccid" }, 404);
+    }
+
+    const ctx = fedi.createContext(new URL(config.activitypub.baseUrl), undefined);
+    const body: { id: string, ccid: string, actorURI: string, noteURL?: string } = {
+        id: entity.id,
+        ccid: entity.ccid,
+        actorURI: ctx.getActorUri(entity.id).href,
+    };
+    if (uri) {
+        // Noteディスパッチャと同じ整合条件: URIのowner(host)がentityのccidであること
+        if (URL.parse(uri)?.host !== entity.ccid) {
+            return c.json({ error: "'uri' is not owned by this ccid" }, 400);
+        }
+        body.noteURL = ctx.getObjectUri(Note, { identifier: entity.id, id: uri }).href;
+    }
+    return c.json(body);
 });
 
 
@@ -198,6 +232,42 @@ app.get("/ap/api/followers", async (c) => {
         .map(f => f.actorURI);
 
     return c.json(followers);
+});
+
+// フォロワーを手動で外す(消滅サーバー・引っ越し済みユーザーなど、Undo(Follow)が来ない相手の掃除用)。
+// 本人のフォロワーに限る。ローカル削除を確定させてから Reject(Follow) をベストエフォートで送る
+app.delete("/ap/api/followers", async (c) => {
+
+    const authInfo = receiveAuthInfo(c)
+    if (!authInfo) {
+        return c.json({ error: "Missing authentication information" }, 400);
+    }
+
+    let uri = c.req.query("uri")?.trim();
+    if (!uri) {
+        return c.json({ error: "Missing 'uri' query parameter" }, 400);
+    }
+    uri = decodeURIComponent(uri).replace(/^activity:\/\//, "https://");
+
+    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, authInfo.ccid)).limit(1).then(res => res[0]);
+    if (!entity) {
+        return c.json({ error: "No ActivityPub entity found for this user" }, 404);
+    }
+
+    const entry = followStore.getFollowers(entity.ccid).find(f => f.actorURI === uri);
+    if (!entry) {
+        return c.json({ error: "Not a follower" }, 404);
+    }
+
+    await removeFollowerEntry(entry, `removed by ${authInfo.ccid} via API`);
+    try {
+        await rejectFollower(entity, entry);
+    } catch (e) {
+        // 配送はベストエフォート(ローカル削除は済んでいる)
+        logger.warn(`Failed to enqueue Reject(Follow) to ${entry.actorURI}: ${e}`);
+    }
+
+    return c.json({ actorURI: entry.actorURI });
 });
 
 app.get("/ap/api/following", async (c) => {

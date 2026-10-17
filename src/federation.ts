@@ -188,22 +188,51 @@ const handleLikeActivity = async (ctx: { parseUri: (uri: URL | null) => any }, a
     }
 };
 
+// followerレコードを1件削除する(cckvのdelete + メモリストア)。メモリから消えた時点で
+// followersディスパッチャの対象外になり、以後の配送は止まる(投入済みキューには効かない)
+export const removeFollowerEntry = async (entry: followStore.FollowerEntry, cause: string) => {
+    logger.info(`Removing follower ${entry.actorURI} of ${entry.ccid}: ${cause}`);
+    await commit({
+        kind: 'delete',
+        schema: SCHEMA_DELETE,
+        value: entry.key,
+        author: config.concrnt.ccid,
+        createdAt: new Date(),
+    }).catch((error) => {
+        // レコードが元々存在しない場合も先へ進む(冪等)
+        logger.warn(`Failed to delete follower record ${entry.key}: ${error}`);
+    });
+    followStore.removeFollowerByKey(entry.key);
+};
+
 // 消滅したリモートactorのfollowerレコードを全ローカルエンティティから削除する
 const purgeFollower = async (actorURI: string, cause: string) => {
     for (const entry of followStore.getFollowersByActorURI(actorURI)) {
-        logger.info(`Purging follower ${actorURI} of ${entry.ccid}: ${cause}`);
-        await commit({
-            kind: 'delete',
-            schema: SCHEMA_DELETE,
-            value: entry.key,
-            author: config.concrnt.ccid,
-            createdAt: new Date(),
-        }).catch((error) => {
-            // レコードが元々存在しない場合も先へ進む(冪等)
-            logger.warn(`Failed to delete follower record ${entry.key}: ${error}`);
-        });
-        followStore.removeFollowerByKey(entry.key);
+        await removeFollowerEntry(entry, cause);
     }
+};
+
+// ユーザー操作でフォロワーを外したことをリモートへ伝える(Mastodonの「フォロワーから削除」と同じ
+// Reject(Follow))。元のFollowのidは保持していないのでactor/objectだけの埋め込みFollowで送る
+// (Mastodonはこの形でも照合する)。消滅済みサーバー宛てになりがちなのでリモートactorは
+// fetchせず、保存済みのinboxへ直接投入する。失敗はfedifyのリトライ/サーキットブレーカー任せ
+export const rejectFollower = async (entity: ApEntity, entry: followStore.FollowerEntry) => {
+    const ctx = federation.createContext(new URL(config.activitypub.baseUrl), undefined);
+    const actorUri = ctx.getActorUri(entity.id);
+    const reject = new Reject({
+        actor: actorUri,
+        to: new URL(entry.actorURI),
+        object: new Follow({
+            actor: new URL(entry.actorURI),
+            object: actorUri,
+        }),
+    });
+    const recipient: Recipient = {
+        id: new URL(entry.actorURI),
+        inboxId: new URL(entry.inbox),
+        endpoints: entry.sharedInbox ? { sharedInbox: new URL(entry.sharedInbox) } : undefined,
+    };
+    await ctx.sendActivity({ identifier: entity.id }, recipient, reject);
 };
 
 const federation = createFederation({
