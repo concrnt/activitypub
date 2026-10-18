@@ -11,6 +11,7 @@ import { CDID, NotFoundError, PermissionError, type Document, type SignedDocumen
 
 import concrntApi, { commit, importCommit, resolveAsProxy } from "./concrnt.ts";
 import { config } from "./config.ts";
+import { profileWebUrl } from "./webRedirect.ts";
 import { meterProvider } from "./metrics.ts";
 import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_MENTION, SCHEMA_REPLY_ASSOCIATION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote, buildActivity, type Visibility } from "./convert.ts";
 import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, followerKey, acceptStateKey, inboxTimelineKey, type ApFollowerValue } from "./schemas.ts";
@@ -826,7 +827,8 @@ export const buildPerson = async (ctx: Context<unknown>, identifier: string): Pr
         endpoints: new Endpoints({
             sharedInbox: ctx.getInboxUri(),
         }),
-        url: ctx.getActorUri(identifier),
+        // 人間向けURLはworld-appのプロフィールページ(idはブリッジURLのまま)
+        url: new URL(profileWebUrl(config.activitypub.webUrl, entity.ccid)),
         publicKey: keys[0]?.cryptographicKey,
         assertionMethods: keys.map((k) => k.multikey),
         followers: ctx.getFollowersUri(identifier),

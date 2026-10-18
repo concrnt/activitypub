@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildWebUrl, parseApPath, resolveWebRedirect } from './webRedirect.ts';
+import { buildWebUrl, parseApPath, postWebUrl, profileWebUrl, resolveWebRedirect } from './webRedirect.ts';
 
 const uri = 'cckv://con1alice/concrnt.world/profiles/main/posts/abc';
 
@@ -39,6 +39,13 @@ describe('parseApPath', () => {
     it('malformed percent-encoding is not a target', () => {
         expect(parseApPath('/ap/acct/%E0%A4%A')).toBeNull();
         expect(parseApPath('/ap/acct/alice/posts/%')).toBeNull();
+    });
+});
+
+describe('profileWebUrl / postWebUrl', () => {
+    it('builds world-app routes', () => {
+        expect(profileWebUrl('https://concrnt.world', 'con1alice')).toBe('https://concrnt.world/profile/con1alice');
+        expect(postWebUrl('https://concrnt.world/', uri)).toBe(`https://concrnt.world/post/${encodeURIComponent(uri)}`);
     });
 });
 

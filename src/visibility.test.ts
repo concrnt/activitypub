@@ -10,7 +10,7 @@ vi.mock('./concrnt.ts', () => ({
     resolveAsProxy: (...args: unknown[]) => resolveAsProxy(...args),
 }));
 vi.mock('./config.ts', () => ({
-    config: { activitypub: { baseUrl: 'https://bridge.test' }, concrnt: { ccid: 'con1svc', domain: 'bridge.test' } },
+    config: { activitypub: { baseUrl: 'https://bridge.test', webUrl: 'https://world.test' }, concrnt: { ccid: 'con1svc', domain: 'bridge.test' } },
 }));
 vi.mock('./db/index.ts', () => ({ db: {}, apEntity: {} }));
 
@@ -106,6 +106,13 @@ describe('buildNote', () => {
         const note = await buildNote(ctx, values, document, 'public');
         expect(note?.toIds.map(u => u.href)).toEqual([PUBLIC_COLLECTION.href]);
         expect(note?.ccIds.map(u => u.href)).toEqual(['https://bridge.test/ap/acct/alice/followers']);
+    });
+
+    it('Note.urlはworld-appの投稿ページ、idはブリッジURL', async () => {
+        const note = await buildNote(ctx, values, document, 'public');
+        expect(note?.id?.href).toBe(`https://bridge.test/ap/acct/alice/posts/${encodeURIComponent(uri)}`);
+        expect(note?.url).toBeInstanceOf(URL);
+        expect((note?.url as URL).href).toBe(`https://world.test/post/${encodeURIComponent(uri)}`);
     });
 
     it('フォロワー限定Noteはfollowers宛てでPublicを含まない', async () => {

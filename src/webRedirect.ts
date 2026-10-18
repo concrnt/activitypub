@@ -30,14 +30,20 @@ export const parseApPath = (pathname: string): WebRedirectTarget | null => {
     return { kind: 'post', identifier, uri: id };
 };
 
-// world-app webのルートに合わせる: `/profile/:ccid`、`/post/:uri`(uriはencodeURIComponent)
+// world-app webのルートに合わせる: `/profile/:ccid`、`/post/:uri`(uriはencodeURIComponent)。
+// ブラウザ向けリダイレクトのほか、Person.url / Note.url(リモートの「元のページを開く」)にも使う
+const webBase = (webUrl: string) => webUrl.replace(/\/+$/, '');
+export const profileWebUrl = (webUrl: string, ccid: string): string =>
+    `${webBase(webUrl)}/profile/${encodeURIComponent(ccid)}`;
+export const postWebUrl = (webUrl: string, uri: string): string =>
+    `${webBase(webUrl)}/post/${encodeURIComponent(uri)}`;
+
 export const buildWebUrl = (webUrl: string, target: WebRedirectTarget, ccid: string): string => {
-    const base = webUrl.replace(/\/+$/, '');
     switch (target.kind) {
         case 'profile':
-            return `${base}/profile/${encodeURIComponent(ccid)}`;
+            return profileWebUrl(webUrl, ccid);
         case 'post':
-            return `${base}/post/${encodeURIComponent(target.uri)}`;
+            return postWebUrl(webUrl, target.uri);
     }
 };
 

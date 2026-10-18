@@ -6,6 +6,7 @@ import { db, apEntity } from './db/index.ts';
 import { NotFoundError, PermissionError } from "@concrnt/client";
 import concrntApi, { resolveAsProxy } from "./concrnt.ts";
 import { config } from "./config.ts";
+import { postWebUrl } from "./webRedirect.ts";
 import { buildNoteParts, type NoteParts } from './render.ts';
 import {
     SCHEMA_AP_NOTE,
@@ -143,6 +144,8 @@ export const buildNote = async (
     visibility: Visibility,
 ): Promise<Note | null> => {
     const noteId = ctx.getObjectUri(Note, values);
+    // 人間向けURL(Mastodon等の「元のページを開く」)はworld-appの投稿ページ。idはブリッジURLのまま
+    const noteUrl = new URL(postWebUrl(config.activitypub.webUrl, values.id));
     const actorUri = ctx.getActorUri(values.identifier);
     const followersUri = ctx.getFollowersUri(values.identifier);
     // fedifyは型をTS標準lib(esnext.temporal)のTemporalで宣言するが実行時は
@@ -176,7 +179,7 @@ export const buildNote = async (
             sensitive: parts.sensitive,
             mediaType: "text/html",
             published,
-            url: noteId,
+            url: noteUrl,
             tags: buildTags(parts),
             attachments: buildAttachments(parts, []),
             quoteUrl: quoteTarget ? new URL(quoteTarget) : null,
@@ -218,7 +221,7 @@ export const buildNote = async (
             sensitive: parts.sensitive,
             mediaType: "text/html",
             published,
-            url: noteId,
+            url: noteUrl,
             replyTarget,
             tags,
             attachments: buildAttachments(parts, []),
@@ -241,7 +244,7 @@ export const buildNote = async (
         sensitive: parts.sensitive,
         mediaType: "text/html",
         published,
-        url: noteId,
+        url: noteUrl,
         tags: [...buildTags(parts), ...mentions.tags],
         attachments: buildAttachments(parts, medias),
     });
