@@ -21,12 +21,15 @@ export interface AppConfig {
   };
   activitypub: {
     baseUrl: string;
+    webUrl: string; // ブラウザ(Accept がAP型でない)でactor/Note URLを開いたときのリダイレクト先(world-app)
     objectCacheTTL: number; // seconds
     allowPrivateAddress: boolean; // dev専用: ローカルのモックactorへのfetch/配送を許可する
   };
 }
 
 type ConfigRecord = Record<string, unknown>;
+
+const DEFAULT_WEB_URL = "https://concrnt.world";
 
 const defaultConfigPath = fileURLToPath(new URL("../config.yaml", import.meta.url));
 const configPath = process.env.CONFIG_PATH ?? defaultConfigPath;
@@ -56,6 +59,24 @@ const expectNumber = (value: unknown, path: string): number => {
   }
 
   return value;
+};
+
+// 末尾スラッシュを落としたorigin+pathで保持する(`${webUrl}/profile/...` と連結するため)
+const expectWebUrl = (value: unknown, path: string): string => {
+  const raw = expectString(value, path).trim();
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`Invalid config: "${path}" must be an absolute URL.`);
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error(`Invalid config: "${path}" must be an http(s) URL.`);
+  }
+  if (url.search || url.hash) {
+    throw new Error(`Invalid config: "${path}" must not include a query or fragment.`);
+  }
+  return url.origin + url.pathname.replace(/\/+$/, "");
 };
 
 const expectHost = (value: unknown, path: string): string => {
@@ -157,6 +178,9 @@ const readConfig = (): AppConfig => {
     },
     activitypub: {
       baseUrl: activitypubBaseUrl,
+      webUrl: activitypub.webUrl === undefined
+        ? DEFAULT_WEB_URL
+        : expectWebUrl(activitypub.webUrl, "activitypub.webUrl"),
       objectCacheTTL: activitypub.objectCacheTTL === undefined
         ? 30 * 24 * 60 * 60
         : expectNumber(activitypub.objectCacheTTL, "activitypub.objectCacheTTL"),

@@ -14,9 +14,6 @@ importers:
       '@fedify/fedify':
         specifier: 2.3.4
         version: 2.3.4
-      '@fedify/hono':
-        specifier: 2.3.4
-        version: 2.3.4(@fedify/fedify@2.3.4)(hono@4.12.1)
       '@fedify/redis':
         specifier: 2.3.4
         version: 2.3.4(@fedify/fedify@2.3.4)(ioredis@5.9.3)
@@ -684,12 +681,6 @@ packages:
   '@fedify/fedify@2.3.4':
     resolution: {integrity: sha512-mrANyBg/2+LgDooOpDPfa5MWUZzWPU/HubgO6Gpw5jR+U15UU5bHGUEUpWsFGsC61ciCVq0BycV3mdD0EivLxA==}
     engines: {bun: '>=1.1.0', deno: '>=2.0.0', node: '>=22.0.0'}
-
-  '@fedify/hono@2.3.4':
-    resolution: {integrity: sha512-TkcRN5Oq5o7rZ4zGi+KxbTiKJ/7t0vc/25Rt4VgUez74Uyyn+WjZii55935EUQlrkcsWnm1x6MXGXNweXHToVA==}
-    peerDependencies:
-      '@fedify/fedify': ^2.3.4
-      hono: ^4.0.0
 
   '@fedify/lint@2.0.0':
     resolution: {integrity: sha512-JbpqgwWbtA4HoKZvV9bgge617ElY9mnoN//W63ZOI4IKMp+o04DbRE8tUMzrNMYNwvltTBM+/CDK8ujENnYwUw==}
@@ -2460,11 +2451,6 @@ snapshots:
       jsonld: 9.0.0
       structured-field-values: 2.0.4
       urlpattern-polyfill: 10.1.0
-
-  '@fedify/hono@2.3.4(@fedify/fedify@2.3.4)(hono@4.12.1)':
-    dependencies:
-      '@fedify/fedify': 2.3.4
-      hono: 4.12.1
 
   '@fedify/lint@2.0.0(@fedify/fedify@2.3.4)(eslint@9.39.3(jiti@2.7.0))(typescript@5.9.3)':
     dependencies:

@@ -12,7 +12,7 @@ Fediverse ⇄ [Fedify federation (src/federation.ts)] ⇄ concrnt core
 
 - **src/federation.ts** — Fedify の inbox リスナー(Follow / Undo / Accept / Reject / Create / Announce / Like / EmojiReact / Update / Delete)、アクター・鍵・followers・outbox・Note の各ディスパッチャ。
 - **src/daemon.ts** — Redis pub/sub で concrnt のイベントを購読し、投稿→Create、boost→Announce、Like/リアクション→Like、削除→Delete/Undo、プロフィール更新→Update(Person) を配信。
-- **src/app.ts** — concrnt クライアント向けの REST API (`/ap/api/*`): setup / settings / stats / followers / following / removeFollower(`DELETE /ap/api/followers?uri=` でフォロワーを手動で外し Reject(Follow) を送る。消滅サーバー・引っ越し済みユーザーの掃除用) / resolve / import / lookup(ccid→アクター・Note URL の公開解決。[activitypub-relay](https://github.com/concrnt/activitypub-relay) が外向き Announce の対象 URL を得るのに使う)。`/cc-info` で各エンドポイントを `net.concrnt.activitypub.*` シグネチャとして concrnt 本体へ広告。
+- **src/app.ts** — concrnt クライアント向けの REST API (`/ap/api/*`): setup / settings / stats / followers / following / removeFollower(`DELETE /ap/api/followers?uri=` でフォロワーを手動で外し Reject(Follow) を送る。消滅サーバー・引っ越し済みユーザーの掃除用) / resolve / import / lookup(ccid→アクター・Note URL の公開解決。[activitypub-relay](https://github.com/concrnt/activitypub-relay) が外向き Announce の対象 URL を得るのに使う)。`/cc-info` で各エンドポイントを `net.concrnt.activitypub.*` シグネチャとして concrnt 本体へ広告。また、actor / Note の URL を Accept が ActivityPub 型でないクライアント(ブラウザ等)で開くと、JSON ではなく `activitypub.webUrl`(既定 `https://concrnt.world`)の `/profile/<ccid>` / `/post/<uri>` へ 302 する(v1 ブリッジと同じ挙動)。
 - **src/convert.ts, src/render.ts, src/schemas.ts** — concrnt ドキュメント ⇄ AP オブジェクトの変換ロジック。render/schemas は純粋関数でユニットテスト対象。
 - **src/db/** — Drizzle ORM (Postgres)。
 

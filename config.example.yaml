@@ -13,6 +13,8 @@ concrnt:
   privateKey: replace-with-your-concrnt-private-key
 
 # activitypub:
+#   # ブラウザ(AcceptがActivityPub型でない)でactor/Note URLを開いたときのリダイレクト先(world-app)。デフォルト https://concrnt.world
+#   webUrl: https://concrnt.world
 #   # 受信ノート本文のRedisキャッシュTTL(秒)。デフォルト30日
 #   objectCacheTTL: 2592000
 #   # dev専用: ローカルのモックactorへのfetch/配送を許可する(SSRF防御が無効になるため本番では設定しない)

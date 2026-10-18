@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
-import { federation } from "@fedify/hono";
 import { getLogger } from "@logtape/logtape";
 import fedi, { INSTANCE_ACTOR, storeApNote, removeFollowerEntry, rejectFollower } from "./federation.ts";
 import { Note, PUBLIC_COLLECTION } from "@fedify/vocab";
@@ -13,6 +12,7 @@ import * as followStore from "./followStore.ts";
 import * as objectCache from "./objectCache.ts";
 import { resendPendingFollows } from "./daemon.ts";
 import { renderPrometheus } from "./metrics.ts";
+import { resolveWebRedirect } from "./webRedirect.ts";
 
 const logger = getLogger("activitypub");
 
@@ -84,7 +84,40 @@ app.post("/-/resend-follows", async (c) => {
     return c.json({ sent: count('sent'), failed: count('failed'), skipped: count('skipped'), results });
 });
 
-app.use(federation(fedi, () => undefined));
+// @fedify/hono の federation() 相当。fedifyはroute一致後・ディスパッチャ前に Accept を判定し、
+// JSON-LD不可(ブラウザ等)なら onNotAcceptable を呼ぶ。そこで actor/Note URL なら v1 同様に
+// world-app(config.activitypub.webUrl)の該当ページへ 302 し、それ以外は従来どおり下流→406。
+// Person.url/Note.url は AP id のままなので、リモートの「元のページを開く」もこの経路で world-app に着く。
+const lookupCcidForRedirect = async (identifier: string): Promise<string | null | undefined> => {
+    if (identifier === INSTANCE_ACTOR) return undefined;
+    const entity = await db.select().from(apEntity).where(eq(apEntity.id, identifier)).limit(1).then(res => res[0]);
+    return entity?.ccid ?? null;
+};
+
+app.use(async (c, next) => fedi.fetch(c.req.raw, {
+    contextData: undefined,
+    onNotFound: async () => {
+        await next();
+        return c.res;
+    },
+    onNotAcceptable: async (request) => {
+        const result = await resolveWebRedirect(new URL(request.url).pathname, {
+            webUrl: config.activitypub.webUrl,
+            lookupCcid: lookupCcidForRedirect,
+        });
+        if (result?.kind === "redirect") {
+            return new Response(null, { status: 302, headers: { Location: result.location, Vary: "Accept" } });
+        }
+        if (result?.kind === "not-found") {
+            return new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain", Vary: "Accept" } });
+        }
+        await next();
+        if (c.res.status !== 404) return c.res;
+        // 下流が404を確定(finalized)した後はミドルウェアの戻り値をHonoが無視するので c.res に代入して差し替える
+        c.res = new Response("Not acceptable", { status: 406, headers: { "Content-Type": "text/plain", Vary: "Accept" } });
+        return c.res;
+    },
+}));
 app.use(cors({
     origin: "*",
     allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
