@@ -31,6 +31,16 @@ const hashOf = (s: string) => CDID.newFromStringX(s).toString();
 export const followKey = (userCcid: string, actorURI: string) =>
     `cckv://${userCcid}/${AP_NAMESPACE}/follows/${hashOf(actorURI)}`;
 
+// Follow activity id。レコードキーだけだとフォロー解除→再フォローで同じidを再送することになる。
+// Mastodonは未フォロー相手からのUndo(Follow)をそのidのdelete_upon_arrival(6h)として記憶し、
+// 同idのFollowをAcceptもRejectも返さず捨てるため、コミットごとに変わるcreatedAtで試行単位に一意化する。
+// Accept/Rejectの突合はactor/objectで行うのでidが変わっても影響しない。
+export const followActivityId = (baseUrl: string, recordKey: string, createdAt: string) => {
+    const t = Date.parse(createdAt);
+    const suffix = Number.isNaN(t) ? encodeURIComponent(createdAt) : String(t);
+    return new URL(`${baseUrl}/ap/follows/${encodeURIComponent(recordKey)}/${suffix}`);
+};
+
 // AP側からのフォロワー。リモートアクターはconcrnt鍵を持たないため、
 // ブリッジのサービスアカウントが自分のcckv空間に書く。
 export const followerKey = (svcCcid: string, entityCcid: string, actorURI: string) =>

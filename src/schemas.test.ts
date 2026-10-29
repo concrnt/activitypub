@@ -1,5 +1,27 @@
 import { describe, it, expect } from 'vitest';
-import { isPlainReroute, parseEmojiShortcode, SCHEMA_REROUTE, SCHEMA_AP_NOTE, followKey, followerKey, acceptStateKey, settingsKey } from './schemas.ts';
+import { isPlainReroute, parseEmojiShortcode, SCHEMA_REROUTE, SCHEMA_AP_NOTE, followKey, followerKey, acceptStateKey, settingsKey, followActivityId } from './schemas.ts';
+
+describe('followActivityId', () => {
+    const base = 'https://bridge.example.com';
+    const key = followKey('con1alice', 'https://mastodon.example/users/bob');
+
+    it('同じレコード・同じcreatedAtなら同じid(Undo/再送で突合できる)', () => {
+        expect(followActivityId(base, key, '2026-10-29T03:51:38.952Z').href)
+            .toBe(followActivityId(base, key, '2026-10-29T03:51:38.952Z').href);
+    });
+
+    it('解除→再フォロー(createdAtが変わる)で別のidになる', () => {
+        const first = followActivityId(base, key, '2026-08-08T10:30:01.479776751Z');
+        const second = followActivityId(base, key, '2026-10-29T03:51:38.952Z');
+        expect(first.href).not.toBe(second.href);
+        expect(first.href).toBe(`${base}/ap/follows/${encodeURIComponent(key)}/1786185001479`);
+    });
+
+    it('createdAtが日時として読めなくても文字列のまま一意化する', () => {
+        expect(followActivityId(base, key, 'not-a-date').href)
+            .toBe(`${base}/ap/follows/${encodeURIComponent(key)}/not-a-date`);
+    });
+});
 
 describe('isPlainReroute', () => {
     it('bodyのないrerouteはboost扱い', () => {

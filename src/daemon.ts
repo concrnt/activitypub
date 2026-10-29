@@ -10,7 +10,7 @@ import { type Document } from "@concrnt/client";
 import concrntApi, { commit } from "./concrnt.ts";
 import { config } from "./config.ts";
 import { buildActivity, resolveVisibility, type Visibility, SCHEMA_AP_NOTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_DELETE } from "./convert.ts";
-import { SCHEMA_AP_FOLLOW, SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, acceptStateKey, settingsKey, type ApFollowerValue, type ApAcceptStateValue, inboxTimelineKey } from "./schemas.ts";
+import { SCHEMA_AP_FOLLOW, SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, acceptStateKey, followActivityId, settingsKey, type ApFollowerValue, type ApAcceptStateValue, inboxTimelineKey } from "./schemas.ts";
 import * as followStore from "./followStore.ts";
 import * as settingsStore from "./settingsStore.ts";
 import * as inboxStore from "./inboxStore.ts";
@@ -409,15 +409,11 @@ const handleAssociationDeleted = async (msg: CoreEvent) => {
     outboundLikeCcfs.delete(msg.uri);
 }
 
-// Follow/Undo(Follow)を突合できるよう、followレコードのキーから決定的にアクティビティidを導出する
-const followActivityId = (recordKey: string) =>
-    new URL(`${config.activitypub.baseUrl}/ap/follows/${encodeURIComponent(recordKey)}`);
-
 // pendingのフォローへFollowアクティビティを再送する(app.tsの内部API用)。
 // v1移行はAcceptを取りこぼしたaccepted=false行をpendingのまま持ち込むため、
 // リモートでは確立済みの関係が承認待ち表示で残ることがある。重複Followには
 // Mastodon等が冪等にAcceptを返すので、再送は検証と修復を兼ねる。activity idは
-// 初回送信と同じfollowActivityId(レコードキー由来)なのでAccept突合も変わらない。
+// 初回送信と同じ(レコードのcreatedAt由来)なのでAccept突合も変わらない。
 export interface ResendFollowResult { ccid: string, actorURI: string, status: 'sent' | 'failed' | 'skipped', reason?: string }
 
 export const resendPendingFollows = async (opts: { ccid?: string, actorURIs?: string[], dryRun?: boolean }): Promise<ResendFollowResult[]> => {
@@ -452,7 +448,7 @@ export const resendPendingFollows = async (opts: { ccid?: string, actorURIs?: st
                     { identifier: entity.id },
                     actor,
                     new Follow({
-                        id: followActivityId(entry.key),
+                        id: followActivityId(config.activitypub.baseUrl, entry.key, entry.createdAt),
                         actor: ctx.getActorUri(entity.id),
                         object: new URL(entry.actorURI),
                         to: new URL(entry.actorURI),
@@ -518,7 +514,8 @@ const handleFollowRecordEvent = async (entity: ApEntity, channel: string, msg: C
         }
 
         // 送信前に登録し、送信に失敗したら取り消す(再createdで再試行可能にする)
-        followStore.setFollowing({ ccid: entity.ccid, key: channel, actorURI });
+        const createdAt = String(document.createdAt ?? '');
+        followStore.setFollowing({ ccid: entity.ccid, key: channel, actorURI, createdAt });
 
         try {
             const documentLoader = await ctx.getDocumentLoader({ identifier: entity.id });
@@ -538,7 +535,7 @@ const handleFollowRecordEvent = async (entity: ApEntity, channel: string, msg: C
                 { identifier: entity.id },
                 actor,
                 new Follow({
-                    id: followActivityId(channel),
+                    id: followActivityId(config.activitypub.baseUrl, channel, createdAt),
                     actor: ctx.getActorUri(entity.id),
                     object: new URL(actorURI),
                     to: new URL(actorURI),
@@ -554,9 +551,12 @@ const handleFollowRecordEvent = async (entity: ApEntity, channel: string, msg: C
     } else if (msg.type === "deleted") {
 
         // deletedイベントは値を持たないため、メモリ上のキー逆引きで対象を特定する
-        const ref = followStore.getByKey(msg.uri);
-        if (!ref || ref.kind !== 'follow' || ref.ccid !== entity.ccid) return;
-        const actorURI = ref.actorURI;
+        const entry = followStore.getFollowingByKey(msg.uri);
+        if (!entry || entry.ccid !== entity.ccid) return;
+        const actorURI = entry.actorURI;
+        // 送信済みFollowと同じid(createdAt由来)で取り消す。この導出に切り替える前に送った
+        // Followとはidが一致しないが、主要実装はUndo(Follow)をactor/objectで突合する
+        const followId = followActivityId(config.activitypub.baseUrl, msg.uri, entry.createdAt);
 
         const documentLoader = await ctx.getDocumentLoader({ identifier: entity.id });
         const actor = await ctx.lookupObject(actorURI, { documentLoader }).catch(() => null);
@@ -565,10 +565,10 @@ const handleFollowRecordEvent = async (entity: ApEntity, channel: string, msg: C
                 { identifier: entity.id },
                 actor,
                 new Undo({
-                    id: new URL("#undo", followActivityId(msg.uri)),
+                    id: new URL("#undo", followId),
                     actor: ctx.getActorUri(entity.id),
                     object: new Follow({
-                        id: followActivityId(msg.uri),
+                        id: followId,
                         actor: ctx.getActorUri(entity.id),
                         object: new URL(actorURI),
                         to: new URL(actorURI),

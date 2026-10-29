@@ -18,7 +18,8 @@ import { AP_NAMESPACE, SCHEMA_AP_FOLLOW, SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_ST
 
 const logger = getLogger("activitypub");
 
-export interface FollowingEntry { ccid: string, key: string, actorURI: string }
+// createdAt はレコードのコミット時刻。送信した Follow activity id の導出に使う(Undo/再送で同じ id を使うため保持)
+export interface FollowingEntry { ccid: string, key: string, actorURI: string, createdAt: string }
 export interface FollowerEntry { ccid: string, key: string, actorURI: string, inbox: string, sharedInbox?: string }
 export type FollowStatus = AcceptStatus | 'pending';
 
@@ -91,6 +92,12 @@ export const removeAcceptStateByKey = (key: string) => {
 }
 
 export const getByKey = (key: string): KeyRef | undefined => byKey.get(key);
+
+export const getFollowingByKey = (key: string): FollowingEntry | undefined => {
+    const ref = byKey.get(key);
+    if (!ref || ref.kind !== 'follow') return undefined;
+    return followingByCcid.get(ref.ccid)?.get(ref.actorURI);
+}
 
 export const getAcceptState = (ccid: string, actorURI: string): FollowStatus =>
     acceptStates.get(ccid)?.get(actorURI) ?? 'pending';
@@ -201,7 +208,7 @@ export const ensureEntityFollowsLoaded = async (ccid: string) => {
             const value = rec.value as ApFollowValue;
             // 本人署名かつ正しいスキーマのレコードのみ採用する
             if (rec.author !== ccid || rec.schema !== SCHEMA_AP_FOLLOW || !value?.actorURI) continue;
-            setFollowing({ ccid, key: rec.key, actorURI: value.actorURI });
+            setFollowing({ ccid, key: rec.key, actorURI: value.actorURI, createdAt: rec.createdAt });
             count++;
         }
         logger.info(`followStore: loaded ${count} follows for ${ccid}`);
