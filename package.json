@@ -35,7 +35,7 @@
     "@fedify/lint": "2.0.0",
     "@types/pg": "^8.16.0",
     "drizzle-kit": "^0.31.11",
-    "eslint": "^9.0.0",
+    "eslint": "^10.13.0",
     "jiti": "^2.7.0",
     "typescript": "5.9.3",
     "vitest": "^5.0.5"
