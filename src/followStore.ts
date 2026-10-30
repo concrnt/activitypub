@@ -10,6 +10,7 @@
 // 読取制限ポリシー付きの follow レコードは query の読取権限フィルタで落ちるため
 // 対象外(公開レコード前提)。
 
+import type { QueryResult } from "@concrnt/client";
 import { getLogger } from "@logtape/logtape";
 
 import concrntApi from "./concrnt.ts";
@@ -131,7 +132,7 @@ const queryAllByPrefix = async (prefix: string, schema: string): Promise<LoadedR
     let since: string | undefined = undefined;
 
     for (;;) {
-        const page = await concrntApi.query(
+        const page: QueryResult = await concrntApi.query(
             { prefix, schema, limit: 100, order: 'asc', since },
             config.concrnt.domain,
         );
