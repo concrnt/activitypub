@@ -5,6 +5,6 @@ import fedifyLint from "@fedify/lint";
 export default [
     {
         ...fedifyLint,
-        files: [...fedifyLint.files, "src/federation.ts"],
+        files: [...(fedifyLint.files ?? []), "src/federation.ts"],
     },
 ];
