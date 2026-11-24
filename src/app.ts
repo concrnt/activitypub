@@ -4,7 +4,7 @@ import { Hono, type Context as HonoContext } from "hono";
 import { cors } from "hono/cors";
 import { getLogger } from "@logtape/logtape";
 import fedi, { INSTANCE_ACTOR, storeApNote, removeFollowerEntry, rejectFollower } from "./federation.ts";
-import { Note, PUBLIC_COLLECTION } from "@fedify/vocab";
+import { Move, Note, PUBLIC_COLLECTION, isActor } from "@fedify/vocab";
 import { db, apEntity } from "./db/index.ts"
 import { eq } from "drizzle-orm";
 import { config } from "./config.ts";
@@ -46,6 +46,7 @@ const ccEndpoints: Record<string, string> = {
     "net.concrnt.activitypub.info":      "/ap/api/info",
     "net.concrnt.activitypub.setup":     "/ap/api/setup",      // POST {id}
     "net.concrnt.activitypub.settings":  "/ap/api/settings",   // GET=取得 (listenTimelines等のユーザー設定はcckvレコード側)
+    "net.concrnt.activitypub.move":      "/ap/api/move",       // POST {target}
     "net.concrnt.activitypub.stats":     "/ap/api/stats",
     "net.concrnt.activitypub.followers": "/ap/api/followers",
     "net.concrnt.activitypub.removeFollower": "/ap/api/followers?uri={uri}", // DELETE
@@ -219,7 +220,58 @@ app.get("/ap/api/settings", async (c) => {
         ccid: entity.ccid,
         id: entity.id,
         enabled: entity.enabled,
+        movedTo: entity.movedTo,
     });
+});
+
+// 転出: 移行先アクターが自分をalsoKnownAsに載せていることを確かめてからmovedToを記録し、
+// フォロワーへMoveを送る(フォロワー側のサーバーが移行先へフォローし直す)。取り消しは無い
+app.post("/ap/api/move", async (c) => {
+
+    const authInfo = receiveAuthInfo(c)
+    if (!authInfo) {
+        return c.json({ error: "Missing authentication information" }, 400);
+    }
+
+    const { target } = await c.req.json();
+    if (typeof target !== "string" || target.trim() === "") {
+        return c.json({ error: "Missing 'target' in request body" }, 400);
+    }
+
+    const entity = await db.select().from(apEntity).where(eq(apEntity.ccid, authInfo.ccid)).limit(1).then(res => res[0]);
+    if (!entity) {
+        return c.json({ error: "No ActivityPub entity found for this user" }, 404);
+    }
+    if (entity.movedTo) {
+        return c.json({ error: "Already moved" }, 409);
+    }
+
+    const ctx = fedi.createContext(c.req.raw, undefined);
+    const self = ctx.getActorUri(entity.id);
+    const documentLoader = await ctx.getDocumentLoader({ identifier: entity.id });
+    const actor = await ctx.lookupObject(target.trim(), { documentLoader }).catch(() => null);
+    if (actor == null || !isActor(actor) || actor.id == null) {
+        return c.json({ error: "Target is not an actor" }, 422);
+    }
+    if (!actor.aliasIds.some((a) => a.href === self.href)) {
+        return c.json({ error: "Target does not list this account in alsoKnownAs" }, 422);
+    }
+
+    await db.update(apEntity).set({ movedTo: actor.id.href }).where(eq(apEntity.id, entity.id));
+    await ctx.sendActivity(
+        { identifier: entity.id },
+        "followers",
+        new Move({
+            id: new URL(`${self.href}#move-${Date.now()}`),
+            actor: self,
+            object: self,
+            target: actor.id,
+            to: ctx.getFollowersUri(entity.id),
+        }),
+    );
+    logger.info(`${entity.id} moved to ${actor.id.href}`);
+
+    return c.json({ movedTo: actor.id.href });
 });
 
 

@@ -10,9 +10,9 @@ Fediverse ⇄ [Fedify federation (src/federation.ts)] ⇄ concrnt core
               [REST API (src/app.ts)]        [daemon (src/daemon.ts)]
 ```
 
-- **src/federation.ts** — Fedify の inbox リスナー(Follow / Undo / Accept / Reject / Create / Announce / Like / EmojiReact / Update / Delete)、アクター・鍵・followers・outbox・Note の各ディスパッチャ。
+- **src/federation.ts** — Fedify の inbox リスナー(Follow / Undo / Accept / Reject / Create / Announce / Like / EmojiReact / Update / Delete / Move)、アクター・鍵・followers・outbox・Note の各ディスパッチャ。
 - **src/daemon.ts** — Redis pub/sub で concrnt のイベントを購読し、投稿→Create、boost→Announce、Like/リアクション→Like、削除→Delete/Undo、プロフィール更新→Update(Person) を配信。
-- **src/app.ts** — concrnt クライアント向けの REST API (`/ap/api/*`): setup / settings / stats / followers / following / removeFollower(`DELETE /ap/api/followers?uri=` でフォロワーを手動で外し Reject(Follow) を送る。消滅サーバー・引っ越し済みユーザーの掃除用) / resolve / import / lookup(ccid→アクター・Note URL の公開解決。[activitypub-relay](https://github.com/concrnt/activitypub-relay) が外向き Announce の対象 URL を得るのに使う)。`/cc-info` で各エンドポイントを `net.concrnt.activitypub.*` シグネチャとして concrnt 本体へ広告。また、actor / Note の URL を Accept が ActivityPub 型でないクライアント(ブラウザ等)で開くと、JSON ではなく `activitypub.webUrl`(既定 `https://concrnt.world`)の `/profile/<ccid>` / `/post/<uri>` へ 302 する(v1 ブリッジと同じ挙動)。`Person.url` / `Note.url` も同じ world-app の URL を指す(id はブリッジ URL のまま)。
+- **src/app.ts** — concrnt クライアント向けの REST API (`/ap/api/*`): setup / settings / move(`POST /ap/api/move {target}` で転出。移行先が自分を `alsoKnownAs` に載せていることを確かめ、`movedTo` を記録してフォロワーへ Move を送る。取り消しは無い) / stats / followers / following / removeFollower(`DELETE /ap/api/followers?uri=` でフォロワーを手動で外し Reject(Follow) を送る。消滅サーバー・引っ越し済みユーザーの掃除用) / resolve / import / lookup(ccid→アクター・Note URL の公開解決。[activitypub-relay](https://github.com/concrnt/activitypub-relay) が外向き Announce の対象 URL を得るのに使う)。`/cc-info` で各エンドポイントを `net.concrnt.activitypub.*` シグネチャとして concrnt 本体へ広告。また、actor / Note の URL を Accept が ActivityPub 型でないクライアント(ブラウザ等)で開くと、JSON ではなく `activitypub.webUrl`(既定 `https://concrnt.world`)の `/profile/<ccid>` / `/post/<uri>` へ 302 する(v1 ブリッジと同じ挙動)。`Person.url` / `Note.url` も同じ world-app の URL を指す(id はブリッジ URL のまま)。
 - **src/convert.ts, src/render.ts, src/schemas.ts** — concrnt ドキュメント ⇄ AP オブジェクトの変換ロジック。render/schemas は純粋関数でユニットテスト対象。
 - **src/db/** — Drizzle ORM (Postgres)。
 
@@ -32,10 +32,14 @@ Fediverse ⇄ [Fedify federation (src/federation.ts)] ⇄ concrnt core
 | `ap/note.json` | リモート Note への軽量参照 | 受信 |
 | `delete.json` | `Delete` / `Undo` | 双方向 |
 | `p/main.json` | `Person` (name/summary/icon) + `Update` | 送信 |
+| `ap/settings.json` の `aliases` | `Person.alsoKnownAs`(転入元) | 送信 |
+| `ap/follow.json` | `Move`(フォロー先の引っ越し) → フォローレコードを移行先へ付け替え | 受信 |
 
 受信したリモート投稿は本文を複製せず、`ap/note.json` (`{actorURL, noteURL}`) としてフォロワーの inbox タイムラインへ配送します(表示時にクライアントが解決)。受信 boost は同様にサービスアカウント名義の `m/reroute.json` + `profileOverride` で表現します。
 
 AP オブジェクト ⇄ concrnt URI の対応は、note/announce は URL ハッシュによる決定的キー、like/reaction と送信済み activity は `ap_object_references` テーブルで管理します。
+
+フォロー先から Move を受けると、移行先が移行元を `alsoKnownAs` に載せていることを確かめたうえで、ローカルのフォロワーのフォローレコード(ユーザーの空間)をサービスアカウント名義で移行先へ付け替えます。書き込めるのは、ユーザーが `cckv://<ccid>/activitypub.concrnt.world/follows` に `https://policy.concrnt.world/t/allow-editors.json`(`entities: [サービスアカウント]`)付きの親レコードを置いている場合だけです(world-app が AP 設定画面で作成)。
 
 ## セットアップ
 

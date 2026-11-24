@@ -4,6 +4,8 @@ export const apEntity = pgTable("ap_entities", {
     id: text("id").notNull().primaryKey(),
     ccid: text("ccid").notNull().unique(),
     enabled: boolean("enabled").notNull().default(true),
+    // 転出先アクターのURI。PersonのmovedToに出す(取り消しは無いので一度入れたら変えない)
+    movedTo: text("moved_to"),
     cDate: date("c_date").notNull().defaultNow(),
 });
 

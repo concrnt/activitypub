@@ -1,5 +1,5 @@
 import { createFederation, exportJwk, generateCryptoKeyPair } from "@fedify/fedify";
-import { Person, Application, Follow, Endpoints, Accept, Reject, Undo, Note, type Recipient, Activity, Create, Like, Delete, Announce, EmojiReact, Emoji, Image, Update, Mention, type Actor } from "@fedify/vocab";
+import { Person, Application, Follow, Endpoints, Accept, Reject, Undo, Note, type Recipient, Activity, Create, Like, Delete, Announce, EmojiReact, Emoji, Image, Update, Mention, Move, isActor, type Actor } from "@fedify/vocab";
 import type { Context } from "@fedify/fedify";
 import { getLogger } from "@logtape/logtape";
 import { RedisKvStore, RedisMessageQueue } from "@fedify/redis";
@@ -14,7 +14,7 @@ import { config } from "./config.ts";
 import { profileWebUrl } from "./webRedirect.ts";
 import { meterProvider } from "./metrics.ts";
 import { SCHEMA_AP_NOTE, SCHEMA_REROUTE, SCHEMA_REFERENCE, SCHEMA_LIKE, SCHEMA_REACTION, SCHEMA_MENTION, SCHEMA_REPLY_ASSOCIATION, SCHEMA_DELETE, parseEmojiShortcode, renderMarkdownToHtml, buildNote, buildActivity, type Visibility } from "./convert.ts";
-import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, AP_NAMESPACE, followerKey, acceptStateKey, inboxTimelineKey, type ApFollowerValue } from "./schemas.ts";
+import { SCHEMA_AP_FOLLOWER, SCHEMA_AP_ACCEPT_STATE, SCHEMA_AP_FOLLOW, AP_NAMESPACE, followerKey, followKey, acceptStateKey, inboxTimelineKey, type ApFollowerValue } from "./schemas.ts";
 import * as followStore from "./followStore.ts";
 import * as inboxStore from "./inboxStore.ts";
 import * as settingsStore from "./settingsStore.ts";
@@ -686,6 +686,54 @@ federation
         cached.json = await objectCache.buildCacheJson(object, update);
         await objectCache.putObject(object.id.href, cached);
     })
+    // フォロー中のリモートアクターの引っ越し。ローカルのフォロワーのフォローレコードを
+    // 移行先へ付け替える(Follow/Undo(Follow)の送信はレコードイベントを受けたdaemonが行う)。
+    // レコードはユーザーの空間にあるので、ユーザーがfollows親レコードのallow-editorsで
+    // サービスアカウントに編集権を渡している場合だけ書ける
+    .on(Move, async (ctx, move) => {
+        const origin = move.actorId?.href;
+        if (origin == null || move.objectId?.href !== origin || move.targetId == null) {
+            logger.warn(`Received Move with invalid actor/object/target: ${move.id}`);
+            return;
+        }
+
+        const ccids = followStore.getLocalFollowerCcids(origin);
+        if (ccids.length === 0) return;
+
+        // 移行先が移行元をalsoKnownAsに載せていること(移行先の本人も合意していること)を確かめる
+        const documentLoader = await ctx.getDocumentLoader({ identifier: INSTANCE_ACTOR });
+        const target = await ctx.lookupObject(move.targetId.href, { documentLoader });
+        if (target == null || !isActor(target) || target.id == null || !target.aliasIds.some((a) => a.href === origin)) {
+            logger.info(`Ignoring Move from ${origin}: target ${move.targetId.href} does not alias it`);
+            return;
+        }
+
+        for (const ccid of ccids) {
+            const entry = followStore.getFollowing(ccid).find((f) => f.actorURI === origin);
+            if (entry == null) continue;
+            try {
+                await commit({
+                    kind: 'record',
+                    key: followKey(ccid, target.id.href),
+                    schema: SCHEMA_AP_FOLLOW,
+                    value: { actorURI: target.id.href },
+                    author: config.concrnt.ccid,
+                    createdAt: new Date(),
+                });
+                await commit({
+                    kind: 'delete',
+                    schema: SCHEMA_DELETE,
+                    value: entry.key,
+                    author: config.concrnt.ccid,
+                    createdAt: new Date(),
+                });
+                logger.info(`Moved follow of ${ccid} from ${origin} to ${target.id.href}`);
+            } catch (error) {
+                // allow-editors未設定のユーザーは権限エラーになる。他のユーザーの付け替えは続ける
+                logger.warn(`Failed to move follow of ${ccid} from ${origin} to ${target.id.href}: ${error}`);
+            }
+        }
+    })
     .on(EmojiReact, async (ctx, react) => {
         await handleLikeActivity(ctx, react);
     })
@@ -832,6 +880,8 @@ export const buildPerson = async (ctx: Context<unknown>, identifier: string): Pr
         publicKey: keys[0]?.cryptographicKey,
         assertionMethods: keys.map((k) => k.multikey),
         followers: ctx.getFollowersUri(identifier),
+        aliases: settingsStore.getAliases(entity.ccid).map((a) => new URL(a)),
+        successor: entity.movedTo ? new URL(entity.movedTo) : null,
     });
 };
 

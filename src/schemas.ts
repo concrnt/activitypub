@@ -62,7 +62,7 @@ export const inboxTimelineKey = (userCcid: string) =>
 export type AcceptStatus = 'accepted' | 'rejected';
 
 export interface ApFollowValue { actorURI: string }
-export interface ApSettingsValue { listenTimelines: string[] }
+export interface ApSettingsValue { listenTimelines: string[], aliases?: string[] }
 export interface ApFollowerValue { ccid: string, actorURI: string, inbox: string, sharedInbox?: string }
 export interface ApAcceptStateValue { ccid: string, actorURI: string, status: AcceptStatus }
 

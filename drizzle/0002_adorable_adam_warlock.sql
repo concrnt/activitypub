@@ -1,0 +1,1 @@
+ALTER TABLE "ap_entities" ADD COLUMN "moved_to" text;

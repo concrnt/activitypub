@@ -15,6 +15,13 @@
       "when": 1785917007119,
       "tag": "0001_lean_the_santerians",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795503472728,
+      "tag": "0002_adorable_adam_warlock",
+      "breakpoints": true
     }
   ]
 }

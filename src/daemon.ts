@@ -494,7 +494,8 @@ const handleFollowRecordEvent = async (entity: ApEntity, channel: string, msg: C
             logger.error(`Failed to resolve follow document: ${channel}`);
             return;
         }
-        if (document.author !== entity.ccid || document.schema !== SCHEMA_AP_FOLLOW) return;
+        // サービスアカウント署名はMove受信時の付け替え(federation.ts)
+        if ((document.author !== entity.ccid && document.author !== config.concrnt.ccid) || document.schema !== SCHEMA_AP_FOLLOW) return;
 
         const actorURI: string | undefined = document.value?.actorURI;
         if (!actorURI) {

@@ -1,6 +1,6 @@
 // フォロー・フォロワー関係のメモリストア。
 // source of truth は concrnt 上の cckv レコード:
-//   - follow:       cckv://<userCcid>/activitypub.concrnt.world/follows/<hash>       (ユーザー署名)
+//   - follow:       cckv://<userCcid>/activitypub.concrnt.world/follows/<hash>       (ユーザー署名。Move受信時の付け替えはサービスAC)
 //   - follower:     cckv://<svcCcid>/activitypub.concrnt.world/followers/<hash>      (サービスAC)
 //   - accept-state: cckv://<svcCcid>/activitypub.concrnt.world/accept-states/<hash>  (サービスAC)
 // 起動時に query API で全件ロードし、以後は Redis イベント(daemon.ts)で更新する。
@@ -207,8 +207,8 @@ export const ensureEntityFollowsLoaded = async (ccid: string) => {
         let count = 0;
         for (const rec of follows) {
             const value = rec.value as ApFollowValue;
-            // 本人署名かつ正しいスキーマのレコードのみ採用する
-            if (rec.author !== ccid || rec.schema !== SCHEMA_AP_FOLLOW || !value?.actorURI) continue;
+            // 本人またはサービスアカウント(引っ越しの付け替え)署名かつ正しいスキーマのレコードのみ採用する
+            if ((rec.author !== ccid && rec.author !== config.concrnt.ccid) || rec.schema !== SCHEMA_AP_FOLLOW || !value?.actorURI) continue;
             setFollowing({ ccid, key: rec.key, actorURI: value.actorURI, createdAt: rec.createdAt });
             count++;
         }
