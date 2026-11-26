@@ -112,7 +112,7 @@ describe('buildNote', () => {
         const note = await buildNote(ctx, values, document, 'public');
         expect(note?.id?.href).toBe(`https://bridge.test/ap/acct/alice/posts/${encodeURIComponent(uri)}`);
         expect(note?.url).toBeInstanceOf(URL);
-        expect((note?.url as URL).href).toBe(`https://world.test/post/${encodeURIComponent(uri)}`);
+        expect((note?.url as URL).href).toBe('https://world.test/con1alice/post/abc');
     });
 
     it('フォロワー限定Noteはfollowers宛てでPublicを含まない', async () => {

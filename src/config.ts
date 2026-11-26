@@ -61,7 +61,7 @@ const expectNumber = (value: unknown, path: string): number => {
   return value;
 };
 
-// 末尾スラッシュを落としたorigin+pathで保持する(`${webUrl}/profile/...` と連結するため)
+// 末尾スラッシュを落としたorigin+pathで保持する(`${webUrl}/<ccid>...` と連結するため)
 const expectWebUrl = (value: unknown, path: string): string => {
   const raw = expectString(value, path).trim();
   let url: URL;

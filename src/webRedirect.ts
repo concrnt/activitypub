@@ -30,13 +30,19 @@ export const parseApPath = (pathname: string): WebRedirectTarget | null => {
     return { kind: 'post', identifier, uri: id };
 };
 
-// world-app webのルートに合わせる: `/profile/:ccid`、`/post/:uri`(uriはencodeURIComponent)。
+// world-app webのルートに合わせる: `/:ccid[/profile/:profile]`、`/:ccid[/profile/:profile]/post/:postId`。
+// 標準キー(cckv://<ccid>/concrnt.world/profiles/<profile>/posts/<postId>)以外の投稿は `/post/:uri`(uriはencodeURIComponent)。
 // ブラウザ向けリダイレクトのほか、Person.url / Note.url(リモートの「元のページを開く」)にも使う
 const webBase = (webUrl: string) => webUrl.replace(/\/+$/, '');
 export const profileWebUrl = (webUrl: string, ccid: string): string =>
-    `${webBase(webUrl)}/profile/${encodeURIComponent(ccid)}`;
-export const postWebUrl = (webUrl: string, uri: string): string =>
-    `${webBase(webUrl)}/post/${encodeURIComponent(uri)}`;
+    `${webBase(webUrl)}/${encodeURIComponent(ccid)}`;
+export const postWebUrl = (webUrl: string, uri: string): string => {
+    const m = /^cckv:\/\/([^/]+)\/concrnt\.world\/profiles\/([^/]+)\/posts\/([^/]+)$/.exec(uri);
+    if (!m) return `${webBase(webUrl)}/post/${encodeURIComponent(uri)}`;
+    return profileWebUrl(webUrl, m[1])
+        + (m[2] === 'main' ? '' : `/profile/${encodeURIComponent(m[2])}`)
+        + `/post/${encodeURIComponent(m[3])}`;
+};
 
 export const buildWebUrl = (webUrl: string, target: WebRedirectTarget, ccid: string): string => {
     switch (target.kind) {

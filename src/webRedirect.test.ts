@@ -44,24 +44,34 @@ describe('parseApPath', () => {
 
 describe('profileWebUrl / postWebUrl', () => {
     it('builds world-app routes', () => {
-        expect(profileWebUrl('https://concrnt.world', 'con1alice')).toBe('https://concrnt.world/profile/con1alice');
-        expect(postWebUrl('https://concrnt.world/', uri)).toBe(`https://concrnt.world/post/${encodeURIComponent(uri)}`);
+        expect(profileWebUrl('https://concrnt.world', 'con1alice')).toBe('https://concrnt.world/con1alice');
+        expect(postWebUrl('https://concrnt.world/', uri)).toBe('https://concrnt.world/con1alice/post/abc');
+    });
+
+    it('サブプロフィールの投稿はプロフィール名を挟む', () => {
+        expect(postWebUrl('https://concrnt.world', 'cckv://con1alice/concrnt.world/profiles/sub/posts/abc'))
+            .toBe('https://concrnt.world/con1alice/profile/sub/post/abc');
+    });
+
+    it('標準キーでない投稿は /post/<encoded uri>', () => {
+        const other = 'cckv://con1alice/example.com/notes/abc';
+        expect(postWebUrl('https://concrnt.world', other)).toBe(`https://concrnt.world/post/${encodeURIComponent(other)}`);
     });
 });
 
 describe('buildWebUrl', () => {
     it('profile and post', () => {
         expect(buildWebUrl('https://concrnt.world', { kind: 'profile', identifier: 'alice' }, 'con1alice'))
-            .toBe('https://concrnt.world/profile/con1alice');
+            .toBe('https://concrnt.world/con1alice');
         expect(buildWebUrl('https://concrnt.world', { kind: 'post', identifier: 'alice', uri }, 'con1alice'))
-            .toBe(`https://concrnt.world/post/${encodeURIComponent(uri)}`);
+            .toBe('https://concrnt.world/con1alice/post/abc');
     });
 
     it('strips trailing slash and keeps a base path', () => {
         expect(buildWebUrl('https://example.com/', { kind: 'profile', identifier: 'alice' }, 'con1alice'))
-            .toBe('https://example.com/profile/con1alice');
+            .toBe('https://example.com/con1alice');
         expect(buildWebUrl('https://example.com/app/', { kind: 'profile', identifier: 'alice' }, 'con1alice'))
-            .toBe('https://example.com/app/profile/con1alice');
+            .toBe('https://example.com/app/con1alice');
     });
 });
 
@@ -75,12 +85,12 @@ describe('resolveWebRedirect', () => {
 
     it('redirects actor to profile page', async () => {
         await expect(resolveWebRedirect('/ap/acct/alice', options))
-            .resolves.toEqual({ kind: 'redirect', location: 'https://concrnt.world/profile/con1alice' });
+            .resolves.toEqual({ kind: 'redirect', location: 'https://concrnt.world/con1alice' });
     });
 
     it('redirects note to post page', async () => {
         await expect(resolveWebRedirect(`/ap/acct/alice/posts/${uri}`, options))
-            .resolves.toEqual({ kind: 'redirect', location: `https://concrnt.world/post/${encodeURIComponent(uri)}` });
+            .resolves.toEqual({ kind: 'redirect', location: 'https://concrnt.world/con1alice/post/abc' });
     });
 
     it('unknown entity is not-found', async () => {
