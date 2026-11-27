@@ -20,7 +20,6 @@ const canonicalized = (fetch: (request: Request) => Response | Promise<Response>
     if (url.protocol === canonical.protocol && url.host === canonical.host) {
       return await fetch(request);
     }
-    logger.debug(`Canonicalizing request URL: ${request.url} -> origin ${canonical.origin}`);
     url.protocol = canonical.protocol;
     url.host = canonical.host;
     url.port = canonical.port;

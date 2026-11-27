@@ -46,11 +46,7 @@ export const filterCcidsWithInbox = async (ccids: string[]): Promise<string[]> =
         await ensureEntityInboxLoaded(ccid).catch((error) => {
             logger.error(`inboxStore: failed to load inbox state for ${ccid}: ${error}`);
         });
-        if (hasInbox(ccid)) {
-            result.push(ccid);
-        } else {
-            logger.debug(`inboxStore: skipping delivery to ${ccid}: no inbox timeline`);
-        }
+        if (hasInbox(ccid)) result.push(ccid);
     }
     return result;
 }

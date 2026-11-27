@@ -76,7 +76,7 @@ export const applyEvent = async (ccid: string, msg: { type: string, documents?: 
         const settings = sanitize(document, ccid);
         settingsByCcid.set(ccid, settings);
         loadedCcids.add(ccid);
-        logger.info(`settingsStore: updated settings for ${ccid}: ${JSON.stringify(settings)}`);
+        logger.info(`settingsStore: updated settings for ${ccid}`);
     } else if (msg.type === "deleted") {
         settingsByCcid.set(ccid, EMPTY);
         loadedCcids.add(ccid);

@@ -346,7 +346,6 @@ federation
         await ctx.sendActivity(object, follower, accept);
     })
     .on(Undo, async (ctx, undo) => {
-        logger.debug(`Received Undo activity from ${undo.actorId}`);
         const object = await undo.getObject();
         if (object instanceof Follow) {
             if (undo.actorId == null || undo.objectId == null) return
@@ -423,8 +422,6 @@ federation
         }
     })
     .on(Accept, async (ctx, accept) => {
-        logger.debug(`Received Accept activity from ${accept.actorId}`);
-
         const follow = await accept.getObject({ crossOrigin: 'trust' });
         if (!(follow instanceof Follow)) return
 
@@ -669,8 +666,6 @@ federation
         followStore.setAcceptState(key, entity.ccid, actorURI, 'rejected');
     })
     .on(Update, async (ctx, update) => {
-        logger.debug(`Received Update activity from ${update.actorId}`);
-
         // キャッシュ済みオブジェクトの本文だけ追従する(未キャッシュ・actor更新はスルー)
         const object = await update.getObject();
         if (object?.id == null) return;
@@ -741,8 +736,6 @@ federation
         await handleLikeActivity(ctx, like);
     })
     .on(Delete, async (ctx, del) => {
-        logger.debug(`Received Delete activity from ${del.actorId}`);
-
         const object = await del.getObject();
         if (object == null || object.id == null) {
             logger.warn(`Received Delete activity with missing or invalid object`);
@@ -757,10 +750,7 @@ federation
         }
 
         // アカウント削除(objectがactor自身)はnoteの保存キーを持たないため対象なし
-        if (object.id.href === del.actorId.href) {
-            logger.debug(`Ignoring account deletion from ${del.actorId.href}`);
-            return;
-        }
+        if (object.id.href === del.actorId.href) return;
 
         await objectCache.deleteObject(object.id.href);
 
@@ -805,7 +795,6 @@ federation
             // 現行コアはcommitハンドラーでErrNotFoundを404にマップせず
             // 500+"not found"本文で返すため、文字列判定も併用する
             if (error instanceof NotFoundError || String(error).includes("not found")) {
-                logger.debug(`Delete for unstored object ${object.id.href}: ${error}`);
                 return;
             }
             throw error;
@@ -914,9 +903,6 @@ federation.setActorDispatcher("/ap/acct/{identifier}", async (ctx, identifier) =
     for (const keyType of ["RSASSA-PKCS1-v1_5", "Ed25519"] as const) {
         const key = keys.find(k => k.keyType === keyType);
         if (key == null) {
-            logger.debug(
-                `The user ${identifier} does not have a ${keyType} key; creating one...`,
-            );
             const { privateKey, publicKey } = await generateCryptoKeyPair(keyType);
             await db.insert(apKeys).values({
                 ownerId: identifier,

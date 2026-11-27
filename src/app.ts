@@ -24,7 +24,6 @@ interface AuthInfo {
 const receiveAuthInfo = (c: HonoContext): AuthInfo | null => {
     const authInfoStr = c.req.header("cc-requester")
     const authInfo = authInfoStr ? JSON.parse(authInfoStr) as AuthInfo : null;
-    logger.debug(`Received request with auth info: ${authInfoStr}`);
     return authInfo;
 }
 
@@ -417,9 +416,7 @@ app.get("/ap/api/resolve", async (c) => {
                 for (const key of Object.keys(rawDoc)) {
                     if (key.startsWith("_misskey_")) jsonLd[key] = rawDoc[key];
                 }
-            } catch (e) {
-                logger.debug(`failed to fetch raw document for ${uri}: ${e}`);
-            }
+            } catch {}
             // publicオブジェクトはresolve結果もキャッシュしてリモートfetchを減らす
             // (非publicのresolve結果はリモートの認可が要求者個人に紐づくため保存しない)
             const addressed = [...obj.toIds, ...obj.ccIds].map(u => u.href);
